@@ -16,6 +16,7 @@ pub struct AtomicGyro {
 
 pub trait Gyro {
     type Error;
+    #[allow(async_fn_in_trait)]
     async fn gyro_read(&mut self) -> Result<[f32; 3], Self::Error>;
 }
 
