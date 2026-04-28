@@ -1,6 +1,6 @@
 use core::{f32, sync::atomic::Ordering};
 
-use embassy_time::{Duration, Instant, Ticker};
+use embassy_time::{Duration, Ticker};
 
 use crate::{
     ACCEL,

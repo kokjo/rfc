@@ -53,6 +53,12 @@ impl RcCtrl {
     }
 }
 
+impl Default for RcCtrl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CSRFFramer {
     buf: [u8; 64],
@@ -102,16 +108,17 @@ impl CSRFFramer {
 
         // log::info!("{frame:02x?}");
 
-        match frame.get(2)?.clone() {
+        #[allow(clippy::identity_op)]
+        match *frame.get(2)? {
             0x16 => {
                 let channels = core::array::try_from_fn(|i| {
                     let bit = 11 * i;
                     let byte = bit >> 3;
                     let shift = bit & 7;
-                    let b0 = frame.get(3 + byte + 0)?.clone() as u32;
-                    let b1 = frame.get(3 + byte + 1)?.clone() as u32;
-                    let b2 = frame.get(3 + byte + 2)?.clone() as u32;
-                    let word = (b0 << 0) | (b1 << 8) | (b2 << 16);
+                    let b0 = *frame.get(3 + byte + 0)? as u32;
+                    let b1 = *frame.get(3 + byte + 1)? as u32;
+                    let b2 = *frame.get(3 + byte + 2)? as u32;
+                    let word = b0 | (b1 << 8) | (b2 << 16);
                     Some(((word >> shift) & 0x7ff) as u16)
                 })?;
 

@@ -1,8 +1,7 @@
-use embassy_stm32::pac::common::Read;
 use embedded_hal::spi::Operation;
 use embedded_hal_async::spi::SpiDevice;
 
-trait Register: Sized {
+pub trait Register: Sized {
     type Error;
     const REGNUM: u8;
     const SIZE: usize;
@@ -148,7 +147,7 @@ impl Register for VideoMode0 {
             | ((self.enable_osd_display as u8) << 3)
             | ((self.enable_vsync as u8) << 2)
             | ((self.software_reset as u8) << 1)
-            | ((self.video_buffer_enable as u8) << 0)]
+            | (self.video_buffer_enable as u8)]
     }
 
     fn decode(v: [u8; Self::SIZE]) -> Result<Self, Self::Error> {
@@ -158,17 +157,17 @@ impl Register for VideoMode0 {
             enable_osd_display: (v[0] >> 3).try_into()?,
             enable_vsync: (v[0] >> 2).try_into()?,
             software_reset: (v[0] >> 1).try_into()?,
-            video_buffer_enable: (v[0] >> 0).try_into()?,
+            video_buffer_enable: v[0].try_into()?,
         })
     }
 }
 
-enum ReadRegisterError<Spi: SpiDevice, Reg: Register> {
+pub enum ReadRegisterError<Spi: SpiDevice, Reg: Register> {
     Spi(Spi::Error),
     Decode(Reg::Error),
 }
 
-struct MAX7456<SpiDev> {
+pub struct MAX7456<SpiDev> {
     spidev: SpiDev,
 }
 
@@ -191,7 +190,7 @@ impl<SpiDev: SpiDevice> MAX7456<SpiDev> {
             ])
             .await
             .map_err(ReadRegisterError::Spi)?;
-        Ok(Reg::decode(bytes).map_err(ReadRegisterError::Decode)?)
+        Reg::decode(bytes).map_err(ReadRegisterError::Decode)
     }
 
     pub async fn write_register<Reg: Register>(&mut self, reg: Reg) -> Result<(), SpiDev::Error>
@@ -200,10 +199,7 @@ impl<SpiDev: SpiDevice> MAX7456<SpiDev> {
     {
         let bytes = reg.encode();
         self.spidev
-            .transaction(&mut [
-                Operation::Write(&[Reg::REGNUM | 0x00]),
-                Operation::Write(&bytes),
-            ])
+            .transaction(&mut [Operation::Write(&[Reg::REGNUM]), Operation::Write(&bytes)])
             .await?;
         Ok(())
     }

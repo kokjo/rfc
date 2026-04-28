@@ -1,11 +1,11 @@
 use embassy_stm32::{exti::ExtiInput, mode::Async};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_time::{Duration, Ticker, Timer};
+use embassy_time::Timer;
 
-use crate::crsf::RcCtrl;
+//use crate::crsf::RcCtrl;
 
 #[embassy_executor::task]
 pub async fn boot_btn_task(mut btn: ExtiInput<'static, Async>) {
+    #[allow(clippy::never_loop)]
     loop {
         btn.wait_for_high().await;
         log::info!("BOOT button pressed, resetting!");

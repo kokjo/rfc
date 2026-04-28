@@ -1,7 +1,9 @@
 #![no_std]
 #![no_main]
 #![feature(array_try_from_fn)]
+#![allow(internal_features)]
 #![feature(core_intrinsics)]
+#![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
 use core::sync::atomic::AtomicBool;
@@ -54,7 +56,7 @@ bind_interrupts!(struct Irqs {
 });
 
 #[derive(Debug, Clone)]
-enum SystemEvents {
+pub enum SystemEvents {
     Booted,
     Armed,
     Disarmed,

@@ -38,6 +38,12 @@ impl Motors {
     }
 }
 
+impl Default for Motors {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 const CHANNEL_TO_MOTOR: [usize; 4] = [2, 3, 0, 1];
 
 #[embassy_executor::task]

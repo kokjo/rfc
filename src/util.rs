@@ -1,20 +1,17 @@
-use core::{
-    ops::{Add, Div, Sub},
-    sync::atomic::{AtomicU32, Ordering},
-};
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use embassy_time::{Duration, Instant};
 
 pub struct RateLimter {
-    last: Instant,
     rate: Duration,
+    last: Instant,
 }
 
 impl RateLimter {
     pub fn new(rate: Duration) -> Self {
         Self {
+            rate,
             last: Instant::now(),
-            rate: rate,
         }
     }
 
@@ -199,6 +196,12 @@ impl<const N: usize, T: Averageable> MovingAverage<N, T> {
     }
 }
 
+impl<const N: usize, T: Averageable> Default for MovingAverage<N, T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct Average<T> {
     count: usize,
     sum: T,
@@ -228,5 +231,11 @@ impl<T: Averageable> Average<T> {
 
     pub fn count(&self) -> usize {
         self.count
+    }
+}
+
+impl<T: Averageable> Default for Average<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }

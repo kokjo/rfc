@@ -13,17 +13,17 @@ use crate::{
     util::{self, AtomicF32, Average, RateLimter, rotate},
 };
 
+pub trait Gyro {
+    type Error;
+    #[allow(async_fn_in_trait)]
+    async fn gyro_read(&mut self) -> Result<[f32; 3], Self::Error>;
+}
+
 #[derive(Debug)]
 pub struct AtomicGyro {
     pit: AtomicF32,
     rol: AtomicF32,
     yaw: AtomicF32,
-}
-
-pub trait Gyro {
-    type Error;
-    #[allow(async_fn_in_trait)]
-    async fn gyro_read(&mut self) -> Result<[f32; 3], Self::Error>;
 }
 
 impl AtomicGyro {
@@ -41,6 +41,12 @@ impl AtomicGyro {
             self.rol.load(Ordering::Relaxed),
             self.yaw.load(Ordering::Relaxed),
         )
+    }
+}
+
+impl Default for AtomicGyro {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -124,6 +130,12 @@ impl Accel {
             self.y.load(Ordering::Relaxed),
             self.z.load(Ordering::Relaxed),
         )
+    }
+}
+
+impl Default for Accel {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
