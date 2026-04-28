@@ -9,6 +9,7 @@ use core::sync::atomic::AtomicBool;
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_executor::Spawner;
 use embassy_stm32::exti::ExtiInput;
+use embassy_stm32::gpio::{Level, Output, OutputType, Pull, Speed};
 use embassy_stm32::mode::Async;
 use embassy_stm32::spi::mode::Master;
 use embassy_stm32::spi::{self, Spi};
@@ -16,9 +17,8 @@ use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::low_level::CountingMode;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm};
 use embassy_stm32::usart::Uart;
-use embassy_stm32::{bind_interrupts, usart};
 use embassy_stm32::wdg::IndependentWatchdog;
-use embassy_stm32::gpio::{Level, Output, OutputType, Pull, Speed};
+use embassy_stm32::{bind_interrupts, usart};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::pubsub::PubSubBehavior;
@@ -27,19 +27,19 @@ use static_cell::StaticCell;
 // use crate::btn::check_enter_bootloader;
 use crate::crsf::RcCtrl;
 use crate::dshot::Motors;
-use crate::gyro::{AtomicGyro, Accel};
+use crate::gyro::{Accel, AtomicGyro};
 
 use {defmt_rtt as _, panic_probe as _};
 
-pub mod crsf;
-pub mod gyro;
-pub mod util;
-pub mod dshot;
 pub mod btn;
+pub mod crsf;
+pub mod dshot;
+pub mod gyro;
 pub mod led;
-pub mod pwm;
-pub mod pids;
 pub mod osd;
+pub mod pids;
+pub mod pwm;
+pub mod util;
 
 bind_interrupts!(struct Irqs {
     USB_LP => embassy_stm32::usb::InterruptHandler<embassy_stm32::peripherals::USB>;
@@ -71,7 +71,8 @@ pub static ACCEL: Accel = Accel::new();
 static MOTORS: Motors = Motors::new();
 
 pub type Stm32SpiBus = Mutex<NoopRawMutex, Spi<'static, Async, Master>>;
-pub type Stm32SpiDevice = SpiDevice<'static, NoopRawMutex, Spi<'static, Async, Master>, Output<'static>>;
+pub type Stm32SpiDevice =
+    SpiDevice<'static, NoopRawMutex, Spi<'static, Async, Master>, Output<'static>>;
 
 static SPI1_BUS: StaticCell<Stm32SpiBus> = StaticCell::new();
 
@@ -98,11 +99,20 @@ async fn main(spawner: Spawner) {
     spawner.spawn(usb_logger(usb_driver).unwrap());
 
     spawner.spawn(btn::boot_btn_task(ExtiInput::new(p.PB8, p.EXTI8, Pull::None, Irqs)).unwrap());
-    spawner.spawn(led::led_task(Output::new(p.PC4, Level::High, Speed::High), &CONTROLS.arm).unwrap());
+    spawner
+        .spawn(led::led_task(Output::new(p.PC4, Level::High, Speed::High), &CONTROLS.arm).unwrap());
 
     let pwm = {
         let led0 = PwmPin::new(p.PB6, OutputType::PushPull);
-        SimplePwm::new(p.TIM4, Some(led0), None, None, None, Hertz::khz(100), Default::default())
+        SimplePwm::new(
+            p.TIM4,
+            Some(led0),
+            None,
+            None,
+            None,
+            Hertz::khz(100),
+            Default::default(),
+        )
     };
     let channels = pwm.split();
     spawner.spawn(pwm::pwm_task(channels.ch1, (200..1800).into(), &CONTROLS.thr).unwrap());
@@ -113,18 +123,23 @@ async fn main(spawner: Spawner) {
         config.stop_bits = usart::StopBits::STOP1;
         config.data_bits = usart::DataBits::DataBits8;
         config.detect_previous_overrun = false;
-        Uart::new(p.USART3, p.PB11, p.PB10, p.DMA1_CH1, p.DMA1_CH2, Irqs, config).unwrap()
+        Uart::new(
+            p.USART3, p.PB11, p.PB10, p.DMA1_CH1, p.DMA1_CH2, Irqs, config,
+        )
+        .unwrap()
     };
     spawner.spawn(crsf::crsf_rx_task(usart3, &CONTROLS).unwrap());
 
     let spi1_bus = SPI1_BUS.init({
         let mut config = spi::Config::default();
         config.frequency = Hertz::mhz(20);
-        let spi = Spi::new(p.SPI1, p.PA5, p.PA7, p.PA6, p.DMA1_CH3, p.DMA1_CH4, Irqs, config);
+        let spi = Spi::new(
+            p.SPI1, p.PA5, p.PA7, p.PA6, p.DMA1_CH3, p.DMA1_CH4, Irqs, config,
+        );
         Mutex::new(spi)
     });
 
-    let gyro_device= SpiDevice::new(spi1_bus, Output::new(p.PC14, Level::High, Speed::High));
+    let gyro_device = SpiDevice::new(spi1_bus, Output::new(p.PC14, Level::High, Speed::High));
     let gyro_intr = ExtiInput::new(p.PC15, p.EXTI15, Pull::None, Irqs);
 
     spawner.spawn(gyro::gyro_task(gyro_device, gyro_intr, &GYRO_CAL, &GYRO, &ACCEL).unwrap());
@@ -135,7 +150,15 @@ async fn main(spawner: Spawner) {
         let ch3 = PwmPin::new(p.PB0, OutputType::PushPull);
         let ch4 = PwmPin::new(p.PB1, OutputType::PushPull);
 
-        SimplePwm::new(p.TIM3, Some(ch1), Some(ch2), Some(ch3), Some(ch4), Hertz::khz(600), CountingMode::EdgeAlignedUp)
+        SimplePwm::new(
+            p.TIM3,
+            Some(ch1),
+            Some(ch2),
+            Some(ch3),
+            Some(ch4),
+            Hertz::khz(600),
+            CountingMode::EdgeAlignedUp,
+        )
     };
     spawner.spawn(dshot::dshot_task(motor_pwm, p.DMA2_CH1, &MOTORS).unwrap());
     spawner.spawn(pids::pids_task(&CONTROLS, &GYRO, &MOTORS).unwrap());
@@ -160,7 +183,7 @@ async fn main(spawner: Spawner) {
 
 #[embassy_executor::task]
 async fn usb_logger(driver: embassy_stm32::usb::Driver<'static, embassy_stm32::peripherals::USB>) {
-    embassy_usb_logger::run!({32*1024}, log::LevelFilter::Info, driver);
+    embassy_usb_logger::run!({ 32 * 1024 }, log::LevelFilter::Info, driver);
 }
 
 // #define USE_ACC
@@ -211,7 +234,7 @@ async fn usb_logger(driver: embassy_stm32::usb::Driver<'static, embassy_stm32::p
 //     TIMER_PIN_MAP( 1, PB0, 1, 2 ) \
 //     TIMER_PIN_MAP( 2, PB1, 1, 3 ) \
 //     TIMER_PIN_MAP( 3, PC6, 1, 4 ) \
-//     TIMER_PIN_MAP( 4, PA4, 1, 5 ) 
+//     TIMER_PIN_MAP( 4, PA4, 1, 5 )
 
 // #define ADC1_DMA_OPT 6
 

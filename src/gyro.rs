@@ -1,11 +1,17 @@
-use core::{convert::Infallible, sync::atomic::{AtomicBool, Ordering}};
+use core::{
+    convert::Infallible,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use embassy_stm32::{exti::ExtiInput, mode::Async};
 use embassy_time::{Duration, Ticker, Timer};
 use embedded_hal::spi::Operation;
 use embedded_hal_async::spi::SpiDevice;
 
-use crate::{Stm32SpiDevice, util::{self, AtomicF32, Average, RateLimter, rotate}};
+use crate::{
+    Stm32SpiDevice,
+    util::{self, AtomicF32, Average, RateLimter, rotate},
+};
 
 #[derive(Debug)]
 pub struct AtomicGyro {
@@ -50,7 +56,7 @@ impl Gyro for &AtomicGyro {
     }
 }
 
-pub struct WatchGyro<const N: usize>(util::watch::Watch<[f32;3], N>);
+pub struct WatchGyro<const N: usize>(util::watch::Watch<[f32; 3], N>);
 
 impl<const N: usize> WatchGyro<N> {
     pub fn receiver(&'static self) -> Option<WatchGyroReceiver<N>> {
@@ -75,10 +81,7 @@ pub struct TransformGyro<G> {
 
 impl<G> TransformGyro<G> {
     pub const fn new(inner: G, transform: [[f32; 4]; 3]) -> Self {
-        Self {
-            inner,
-            transform,
-        }
+        Self { inner, transform }
     }
 
     pub fn set_bias(&mut self, bias: [f32; 3]) {
@@ -95,7 +98,7 @@ impl<G: Gyro> Gyro for TransformGyro<G> {
         let data = self.inner.gyro_read().await?;
         Ok(core::array::from_fn(|i| {
             let row = self.transform[i];
-            data[0]*row[0] + data[1]*row[1] + data[2]*row[2] + row[3]
+            data[0] * row[0] + data[1] * row[1] + data[2] * row[2] + row[3]
         }))
     }
 }
@@ -125,19 +128,25 @@ impl Accel {
 }
 
 #[embassy_executor::task]
-pub async fn gyro_task(spidev: Stm32SpiDevice, _intr: ExtiInput<'static, Async>, cal_gyro_request: &'static AtomicBool, gyro: &'static AtomicGyro, accel: &'static Accel) {
+pub async fn gyro_task(
+    spidev: Stm32SpiDevice,
+    _intr: ExtiInput<'static, Async>,
+    cal_gyro_request: &'static AtomicBool,
+    gyro: &'static AtomicGyro,
+    accel: &'static Accel,
+) {
     let mut icm = TransformGyro::new(
         ICM42688P::new(spidev).await.unwrap(),
         [
             [1.0, 0.0, 0.0, 0.0],
             [0.0, 1.0, 0.0, 0.0],
             [0.0, 0.0, 1.0, 0.0],
-        ]
+        ],
     );
 
     let mut cal_average: Average<[f32; 3]> = Average::new();
     let mut cal_running = false;
-    
+
     let mut gyro_err_rl = RateLimter::new(Duration::from_millis(100));
     let mut gyro_info_rl = RateLimter::new(Duration::from_millis(100));
     let mut accel_err_rl = RateLimter::new(Duration::from_millis(100));
@@ -157,14 +166,24 @@ pub async fn gyro_task(spidev: Stm32SpiDevice, _intr: ExtiInput<'static, Async>,
                     if cal_average.count() < 1024 {
                         let avg = cal_average.update(dps);
                         if gyro_info_rl.check() {
-                            log::info!("GYRO: Calibration average: {:4.1} {:4.1} {:4.1}", avg[0], avg[1], avg[2]);
+                            log::info!(
+                                "GYRO: Calibration average: {:4.1} {:4.1} {:4.1}",
+                                avg[0],
+                                avg[1],
+                                avg[2]
+                            );
                         }
                     } else {
                         cal_running = false;
                         cal_gyro_request.store(false, Ordering::Relaxed);
                         let avg = cal_average.average();
                         icm.set_bias(avg.map(|v| -v));
-                        log::info!("Gyro: Calibrated: {:4.1} {:4.1} {:4.1}", avg[0], avg[1], avg[2]);
+                        log::info!(
+                            "Gyro: Calibrated: {:4.1} {:4.1} {:4.1}",
+                            avg[0],
+                            avg[1],
+                            avg[2]
+                        );
                     }
                 }
 
@@ -174,9 +193,11 @@ pub async fn gyro_task(spidev: Stm32SpiDevice, _intr: ExtiInput<'static, Async>,
                 gyro.pit.store(pit, Ordering::Relaxed);
                 gyro.rol.store(rol, Ordering::Relaxed);
                 gyro.yaw.store(yaw, Ordering::Relaxed);
-            },
-            Err(err) => if gyro_err_rl.check() {
-                log::warn!("Gyro: Failed to read: {err:?}");
+            }
+            Err(err) => {
+                if gyro_err_rl.check() {
+                    log::warn!("Gyro: Failed to read: {err:?}");
+                }
             }
         }
 
@@ -186,10 +207,12 @@ pub async fn gyro_task(spidev: Stm32SpiDevice, _intr: ExtiInput<'static, Async>,
                 accel.x.store(raw[0], Ordering::Relaxed);
                 accel.y.store(raw[1], Ordering::Relaxed);
                 accel.z.store(raw[2], Ordering::Relaxed);
-            },
+            }
 
-            Err(err) => if  accel_err_rl.check() {
-                log::warn!("Accel: Failed to read: {err:?}");
+            Err(err) => {
+                if accel_err_rl.check() {
+                    log::warn!("Accel: Failed to read: {err:?}");
+                }
             }
         }
 
@@ -203,7 +226,7 @@ struct ICM42688P<SpiDev> {
 
 impl<SpiDev: SpiDevice> ICM42688P<SpiDev> {
     pub async fn new(spidev: SpiDev) -> Result<Self, SpiDev::Error> {
-        let mut this = Self{ spidev };
+        let mut this = Self { spidev };
         this.write_reg(0x11, &[0x01]).await?;
         Timer::after_millis(10).await;
         this.write_reg(0x76, &[0x00]).await?;
@@ -212,17 +235,15 @@ impl<SpiDev: SpiDevice> ICM42688P<SpiDev> {
     }
 
     pub async fn read_reg(&mut self, address: u8, buffer: &mut [u8]) -> Result<(), SpiDev::Error> {
-        self.spidev.transaction(&mut [
-            Operation::Write(&[address | 0x80]),
-            Operation::Read(buffer)
-        ]).await
+        self.spidev
+            .transaction(&mut [Operation::Write(&[address | 0x80]), Operation::Read(buffer)])
+            .await
     }
 
     pub async fn write_reg(&mut self, address: u8, buffer: &[u8]) -> Result<(), SpiDev::Error> {
-        self.spidev.transaction(&mut [
-            Operation::Write(&[address]),
-            Operation::Write(buffer)
-        ]).await
+        self.spidev
+            .transaction(&mut [Operation::Write(&[address]), Operation::Write(buffer)])
+            .await
     }
 
     pub async fn read_gyro_bytes(&mut self) -> Result<[u8; 6], SpiDev::Error> {
@@ -260,6 +281,6 @@ impl<SpiDev: SpiDevice> Gyro for ICM42688P<SpiDev> {
     type Error = SpiDev::Error;
 
     async fn gyro_read(&mut self) -> Result<[f32; 3], Self::Error> {
-        Ok(self.read_gyro_raw().await?.map(|v| (v as f32)/16.4))
+        Ok(self.read_gyro_raw().await?.map(|v| (v as f32) / 16.4))
     }
 }

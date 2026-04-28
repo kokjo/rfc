@@ -25,7 +25,7 @@ impl TryFrom<u8> for VideoStandard {
         match value & 1 {
             0 => Ok(Self::NTSC),
             1 => Ok(Self::PAL),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }
@@ -46,7 +46,7 @@ impl TryFrom<u8> for SyncSelectMode {
             0b00 | 0b01 => Ok(Self::AutoSync),
             0b10 => Ok(Self::External),
             0b11 => Ok(Self::Internal),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }
@@ -65,7 +65,7 @@ impl TryFrom<u8> for OnOff {
         match value {
             0 => Ok(Self::Off),
             1 => Ok(Self::On),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }
@@ -84,7 +84,7 @@ impl TryFrom<u8> for EnableVSync {
         match value & 1 {
             0 => Ok(Self::Now),
             1 => Ok(Self::NextVSync),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }
@@ -103,7 +103,7 @@ impl TryFrom<u8> for SoftwareReset {
         match value & 1 {
             0 => Ok(Self::Running),
             1 => Ok(Self::Reseting),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }
@@ -122,7 +122,7 @@ impl TryFrom<u8> for EnableDisable {
         match value & 1 {
             0 => Ok(Self::Enable),
             1 => Ok(Self::Disable),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }
@@ -134,7 +134,7 @@ pub struct VideoMode0 {
     pub enable_osd_display: OnOff,
     pub enable_vsync: EnableVSync,
     pub software_reset: SoftwareReset,
-    pub video_buffer_enable: EnableDisable
+    pub video_buffer_enable: EnableDisable,
 }
 
 impl Register for VideoMode0 {
@@ -143,14 +143,12 @@ impl Register for VideoMode0 {
     const SIZE: usize = 1;
 
     fn encode(&self) -> [u8; Self::SIZE] {
-        [
-            ((self.video_standard as u8) << 6) |
-            ((self.sync_select_mode as u8) << 4) |
-            ((self.enable_osd_display as u8) << 3) |
-            ((self.enable_vsync as u8) << 2) |
-            ((self.software_reset as u8) << 1) |
-            ((self.video_buffer_enable as u8) << 0)
-        ]
+        [((self.video_standard as u8) << 6)
+            | ((self.sync_select_mode as u8) << 4)
+            | ((self.enable_osd_display as u8) << 3)
+            | ((self.enable_vsync as u8) << 2)
+            | ((self.software_reset as u8) << 1)
+            | ((self.video_buffer_enable as u8) << 0)]
     }
 
     fn decode(v: [u8; Self::SIZE]) -> Result<Self, Self::Error> {
@@ -167,7 +165,7 @@ impl Register for VideoMode0 {
 
 enum ReadRegisterError<Spi: SpiDevice, Reg: Register> {
     Spi(Spi::Error),
-    Decode(Reg::Error)
+    Decode(Reg::Error),
 }
 
 struct MAX7456<SpiDev> {
@@ -179,24 +177,34 @@ impl<SpiDev: SpiDevice> MAX7456<SpiDev> {
         Self { spidev }
     }
 
-    pub async fn read_register<Reg: Register>(&mut self) -> Result<Reg, ReadRegisterError<SpiDev, Reg>>
-            where [(); Reg::SIZE]: {
+    pub async fn read_register<Reg: Register>(
+        &mut self,
+    ) -> Result<Reg, ReadRegisterError<SpiDev, Reg>>
+    where
+        [(); Reg::SIZE]:,
+    {
         let mut bytes = [0u8; Reg::SIZE];
-        self.spidev.transaction(&mut [
-            Operation::Write(&[Reg::REGNUM | 0x80]),
-            Operation::Read(&mut bytes),
-        ]).await.map_err(ReadRegisterError::Spi)?;
+        self.spidev
+            .transaction(&mut [
+                Operation::Write(&[Reg::REGNUM | 0x80]),
+                Operation::Read(&mut bytes),
+            ])
+            .await
+            .map_err(ReadRegisterError::Spi)?;
         Ok(Reg::decode(bytes).map_err(ReadRegisterError::Decode)?)
     }
 
     pub async fn write_register<Reg: Register>(&mut self, reg: Reg) -> Result<(), SpiDev::Error>
-            where [(); Reg::SIZE]: {
-                let bytes = reg.encode();
-                self.spidev.transaction(&mut [
-                    Operation::Write(&[Reg::REGNUM | 0x00]),
-                    Operation::Write(&bytes),
-                ]).await?;
-                Ok(())
-
-        }
+    where
+        [(); Reg::SIZE]:,
+    {
+        let bytes = reg.encode();
+        self.spidev
+            .transaction(&mut [
+                Operation::Write(&[Reg::REGNUM | 0x00]),
+                Operation::Write(&bytes),
+            ])
+            .await?;
+        Ok(())
+    }
 }

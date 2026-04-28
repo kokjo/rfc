@@ -1,4 +1,7 @@
-use core::{ops::{Add, Div, Sub}, sync::atomic::{AtomicU32, Ordering}};
+use core::{
+    ops::{Add, Div, Sub},
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 use embassy_time::{Duration, Instant};
 
@@ -9,7 +12,7 @@ pub struct RateLimter {
 
 impl RateLimter {
     pub fn new(rate: Duration) -> Self {
-        Self{
+        Self {
             last: Instant::now(),
             rate: rate,
         }
@@ -51,18 +54,14 @@ pub fn scale(v: f32, min: f32, max: f32, lo: f32, hi: f32) -> f32 {
 }
 
 pub fn deadband(v: f32, mid: f32, band: f32) -> f32 {
-    if (v - mid).abs() < band {
-        mid
-    } else {
-        v
-    }
+    if (v - mid).abs() < band { mid } else { v }
 }
 
 pub fn rotate(x: f32, y: f32, angle: f32) -> (f32, f32) {
     use core::intrinsics::{cosf32, sinf32};
     (
         x * cosf32(angle) - y * sinf32(angle),
-        x * sinf32(angle) + y * cosf32(angle)
+        x * sinf32(angle) + y * cosf32(angle),
     )
 }
 
@@ -72,7 +71,8 @@ pub mod watch {
     use super::RawMutex;
     pub type Watch<T, const N: usize> = embassy_sync::watch::Watch<RawMutex, T, N>;
     pub type Recviver<T, const N: usize> = embassy_sync::watch::Receiver<'static, RawMutex, T, N>;
-    pub type AnonReceiver<T, const N: usize> = embassy_sync::watch::AnonReceiver<'static, RawMutex, T, N>;
+    pub type AnonReceiver<T, const N: usize> =
+        embassy_sync::watch::AnonReceiver<'static, RawMutex, T, N>;
     pub type DynReceiver<T> = embassy_sync::watch::DynReceiver<'static, T>;
     pub type DynAnonReceiver<T> = embassy_sync::watch::DynAnonReceiver<'static, T>;
     pub type Sender<T, const N: usize> = embassy_sync::watch::Sender<'static, RawMutex, T, N>;
@@ -81,9 +81,12 @@ pub mod watch {
 
 pub mod pubsub {
     use super::RawMutex;
-    pub type PubSub<T, const CAP: usize, const SUBS: usize, const PUBS: usize> = embassy_sync::pubsub::PubSubChannel<RawMutex, T, CAP, SUBS, PUBS>;
-    pub type Publisher<T, const CAP: usize, const SUBS: usize, const PUBS: usize> = embassy_sync::pubsub::Publisher<'static, RawMutex, T, CAP, SUBS, PUBS>;
-    pub type Subscriber<T, const CAP: usize, const SUBS: usize, const PUBS: usize> = embassy_sync::pubsub::Subscriber<'static, RawMutex, T, CAP, SUBS, PUBS>;
+    pub type PubSub<T, const CAP: usize, const SUBS: usize, const PUBS: usize> =
+        embassy_sync::pubsub::PubSubChannel<RawMutex, T, CAP, SUBS, PUBS>;
+    pub type Publisher<T, const CAP: usize, const SUBS: usize, const PUBS: usize> =
+        embassy_sync::pubsub::Publisher<'static, RawMutex, T, CAP, SUBS, PUBS>;
+    pub type Subscriber<T, const CAP: usize, const SUBS: usize, const PUBS: usize> =
+        embassy_sync::pubsub::Subscriber<'static, RawMutex, T, CAP, SUBS, PUBS>;
 }
 
 pub mod globalvalue {
@@ -170,8 +173,8 @@ impl<Scale: Copy, T: Scaleable<Scale>, const N: usize> Scaleable<Scale> for [T; 
 
 pub trait Averageable: Copy + Zero + Summable + Scaleable<usize> {}
 
-impl Averageable for f32 { }
-impl<T: Averageable, const N: usize> Averageable for [T; N] { }
+impl Averageable for f32 {}
+impl<T: Averageable, const N: usize> Averageable for [T; N] {}
 
 pub struct MovingAverage<const N: usize, T> {
     i: usize,
@@ -184,7 +187,7 @@ impl<const N: usize, T: Averageable> MovingAverage<N, T> {
         Self {
             i: 0,
             data: [T::ZERO; N],
-            sum: T::ZERO
+            sum: T::ZERO,
         }
     }
 
@@ -198,7 +201,7 @@ impl<const N: usize, T: Averageable> MovingAverage<N, T> {
 
 pub struct Average<T> {
     count: usize,
-    sum: T
+    sum: T,
 }
 
 impl<T: Averageable> Average<T> {

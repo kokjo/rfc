@@ -8,7 +8,7 @@ use crate::util::RateLimter;
 #[derive(Debug)]
 pub enum CRSFMessage {
     RcChannels([u16; 16]),
-    Unknown(u8)
+    Unknown(u8),
 }
 
 #[derive(Debug)]
@@ -31,7 +31,7 @@ impl RcCtrl {
             yaw: AtomicU16::new(0),
             arm: AtomicBool::new(false),
             btn: AtomicBool::new(false),
-            frames: AtomicU32::new(0)
+            frames: AtomicU32::new(0),
         }
     }
 
@@ -61,7 +61,10 @@ struct CSRFFramer {
 
 impl Default for CSRFFramer {
     fn default() -> Self {
-        Self { buf: [0u8; 64], idx: Default::default() }
+        Self {
+            buf: [0u8; 64],
+            idx: Default::default(),
+        }
     }
 }
 
@@ -87,7 +90,7 @@ impl CSRFFramer {
         }
 
         if self.idx < (self.buf[1] as usize) + 2 {
-            return None
+            return None;
         }
 
         self.parse_frame()
@@ -140,7 +143,7 @@ pub async fn crsf_rx_task(mut uart: Uart<'static, Async>, ctrl: &'static RcCtrl)
                         handle_message(&message, ctrl);
                     }
                 }
-            },
+            }
             Err(err) => {
                 if err_rl.check() {
                     log::warn!("CSRF: {err:?}");

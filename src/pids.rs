@@ -2,7 +2,13 @@ use core::{f32, sync::atomic::Ordering};
 
 use embassy_time::{Duration, Instant, Ticker};
 
-use crate::{ACCEL, crsf::RcCtrl, dshot::Motors, gyro::{AtomicGyro, Gyro}, util::{Average, RateLimter, constrain, deadband, scale}};
+use crate::{
+    ACCEL,
+    crsf::RcCtrl,
+    dshot::Motors,
+    gyro::{AtomicGyro, Gyro},
+    util::{Average, RateLimter, constrain, deadband, scale},
+};
 
 struct Pid {
     kp: f32,
@@ -28,7 +34,7 @@ impl Pid {
         self.integral += error * dt;
         let derivative = (error - self.last_error) / dt;
         self.last_error = error;
-        self.kp * error + self.ki * self.integral + self.kd*derivative
+        self.kp * error + self.ki * self.integral + self.kd * derivative
     }
 
     pub fn reset(&mut self) {
@@ -53,7 +59,11 @@ static PID_RP: PidParams = PidParams::new(1.0, 1.0, 0.01);
 static PID_Y: PidParams = PidParams::new(1.0, 1.0, 0.01);
 
 #[embassy_executor::task]
-pub async fn pids_task(ctrl: &'static RcCtrl, mut gyro: &'static AtomicGyro, motors: &'static Motors) {
+pub async fn pids_task(
+    ctrl: &'static RcCtrl,
+    mut gyro: &'static AtomicGyro,
+    motors: &'static Motors,
+) {
     let timing = Duration::from_hz(8000);
     let mut ticker = Ticker::every(timing);
     let mut tick_rl = RateLimter::new(Duration::from_millis(100));
@@ -100,7 +110,7 @@ pub async fn pids_task(ctrl: &'static RcCtrl, mut gyro: &'static AtomicGyro, mot
         let rc_rol = deadband(rc_rol, 0.0, 1.0);
         let rc_yaw = deadband(rc_yaw, 0.0, 1.0);
 
-        let gyro_data= gyro.gyro_read().await.unwrap();
+        let gyro_data = gyro.gyro_read().await.unwrap();
         gyro_avg.update(gyro_data);
 
         let accel_data = ACCEL.read();
@@ -115,16 +125,19 @@ pub async fn pids_task(ctrl: &'static RcCtrl, mut gyro: &'static AtomicGyro, mot
         let yaw_cv = yaw_pid.update(rc_yaw, gy_yaw, dt);
 
         let mixer: [[f32; 4]; 4] = [
-            [1.0,  1.0,  1.0,  1.0],
-            [1.0, -1.0,  1.0, -1.0],
-            [1.0,  1.0, -1.0, -1.0],
-            [1.0, -1.0, -1.0,  1.0],
+            [1.0, 1.0, 1.0, 1.0],
+            [1.0, -1.0, 1.0, -1.0],
+            [1.0, 1.0, -1.0, -1.0],
+            [1.0, -1.0, -1.0, 1.0],
         ];
 
-        let speeds = mixer.map(|mix| mix[0] * rc_thr + mix[1] * pit_cv + mix[2] * rol_cv + mix[3] * yaw_cv);
+        let speeds =
+            mixer.map(|mix| mix[0] * rc_thr + mix[1] * pit_cv + mix[2] * rol_cv + mix[3] * yaw_cv);
         motor_avg.update(speeds);
 
-        motors.speeds.iter().enumerate().for_each(|(i, m)| m.store(constrain(speeds[i], 50.0, 1900.0) as u16, Ordering::Relaxed));
+        motors.speeds.iter().enumerate().for_each(|(i, m)| {
+            m.store(constrain(speeds[i], 50.0, 1900.0) as u16, Ordering::Relaxed)
+        });
         motors.armed.store(armed, Ordering::Relaxed);
 
         if tick_rl.check() {
@@ -145,6 +158,7 @@ pub async fn pids_task(ctrl: &'static RcCtrl, mut gyro: &'static AtomicGyro, mot
             let roll = scale(roll, -f32::consts::PI, f32::consts::PI, -180.0, 180.0);
             let pitch = scale(pitch, -f32::consts::PI, f32::consts::PI, -180.0, 180.0);
 
+            #[rustfmt::skip]
             log::info!("{:08x}: {} RC {:4.1}\t{:4.1}\t{:4.1}\t{:4.1}\tGYRO {:4.1}\t{:4.1}\t{:4.1}\tACCEL {:4.1}\t{:4.1}\t{:4.1}\tANGLE {:3.3}\t{:3.3}\tMOTORS {:4.1}\t{:4.1}\t{:4.1}\t{:4.1} DT {:1.8}",
                 frames, armed,
                 rc_thr, rc_pit, rc_rol, rc_yaw,
@@ -177,7 +191,6 @@ fn fast_atan2(y: f32, x: f32) -> f32 {
         atan - PI
     }
 }
-
 
 fn tilt(ax: f32, ay: f32, az: f32) -> (f32, f32) {
     let roll = fast_atan2(ay, az);
