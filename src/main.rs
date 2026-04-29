@@ -5,6 +5,8 @@
 #![feature(core_intrinsics)]
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
+#![feature(unwrap_infallible)]
+#![feature(never_type)]
 
 use core::sync::atomic::AtomicBool;
 

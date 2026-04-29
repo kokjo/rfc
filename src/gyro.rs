@@ -1,7 +1,4 @@
-use core::{
-    convert::Infallible,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use embassy_stm32::{exti::ExtiInput, mode::Async};
 use embassy_time::{Duration, Ticker, Timer};
@@ -51,7 +48,7 @@ impl Default for AtomicGyro {
 }
 
 impl Gyro for &AtomicGyro {
-    type Error = Infallible;
+    type Error = !;
 
     async fn gyro_read(&mut self) -> Result<[f32; 3], Self::Error> {
         Ok([
@@ -73,7 +70,7 @@ impl<const N: usize> WatchGyro<N> {
 pub struct WatchGyroReceiver<const N: usize>(util::watch::Recviver<[f32; 3], N>);
 
 impl<const N: usize> Gyro for WatchGyroReceiver<N> {
-    type Error = Infallible;
+    type Error = !;
 
     async fn gyro_read(&mut self) -> Result<[f32; 3], Self::Error> {
         Ok(self.0.changed().await)

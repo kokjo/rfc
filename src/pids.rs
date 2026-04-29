@@ -110,7 +110,7 @@ pub async fn pids_task(
         let rc_rol = deadband(rc_rol, 0.0, 1.0);
         let rc_yaw = deadband(rc_yaw, 0.0, 1.0);
 
-        let gyro_data = gyro.gyro_read().await.unwrap();
+        let gyro_data = gyro.gyro_read().await.into_ok();
         gyro_avg.update(gyro_data);
 
         let accel_data = ACCEL.read();
