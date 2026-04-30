@@ -28,7 +28,6 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::pubsub::PubSubBehavior;
 use embassy_time::{Duration, Ticker, Timer};
 use static_cell::StaticCell;
-// use crate::btn::check_enter_bootloader;
 use crate::crsf::RcCtrl;
 use crate::dshot::Motors;
 use crate::gyro::{Accel, AtomicGyro};
@@ -44,6 +43,7 @@ pub mod osd;
 pub mod pids;
 pub mod pwm;
 pub mod util;
+pub mod usb;
 
 bind_interrupts!(struct Irqs {
     USB_LP => embassy_stm32::usb::InterruptHandler<embassy_stm32::peripherals::USB>;
@@ -55,6 +55,7 @@ bind_interrupts!(struct Irqs {
     EXTI9_5 => embassy_stm32::exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI9_5>;
     DMA2_CHANNEL1 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA2_CH1>;
     EXTI15_10 => embassy_stm32::exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI15_10>;
+    FLASH => embassy_stm32::flash::InterruptHandler;
 });
 
 #[derive(Debug, Clone)]
@@ -99,8 +100,7 @@ async fn main(spawner: Spawner) {
         embassy_stm32::init(config)
     };
 
-    let usb_driver = embassy_stm32::usb::Driver::new(p.USB, Irqs, p.PA12, p.PA11);
-    spawner.spawn(usb_logger(usb_driver).unwrap());
+    usb::start_usb_device(&spawner, p.USB, p.FLASH, p.PA12, p.PA11);
 
     spawner.spawn(btn::boot_btn_task(ExtiInput::new(p.PB8, p.EXTI8, Pull::None, Irqs)).unwrap());
     spawner
@@ -185,10 +185,7 @@ async fn main(spawner: Spawner) {
     }
 }
 
-#[embassy_executor::task]
-async fn usb_logger(driver: embassy_stm32::usb::Driver<'static, embassy_stm32::peripherals::USB>) {
-    embassy_usb_logger::run!({ 32 * 1024 }, log::LevelFilter::Info, driver);
-}
+
 
 // #define USE_ACC
 // #define USE_GYRO

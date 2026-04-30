@@ -1,10 +1,10 @@
 [package]
-name = "rfc"
+name = "rfc-flight-controller"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-embassy-stm32 = { version="0.6.0", features = [ "defmt", "time-driver-any", "stm32g473ce", "rt", "memory-x", "unstable-pac", "exti", "dual-bank"]  }
+embassy-stm32 = { version="0.6.0", features = [ "defmt", "time-driver-any", "stm32g473ce", "rt", "unstable-pac", "exti", "dual-bank"]  }
 embassy-executor = { version="0.10.0", features = ["platform-cortex-m", "executor-thread", "defmt"] }
 embassy-time = { version="0.5.1", features = ["defmt", "defmt-timestamp-uptime", "tick-hz-32_768"] }
 cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
@@ -24,3 +24,13 @@ embedded-hal-async = "1.0.0"
 embedded-hal = "1.0.0"
 embassy-embedded-hal = "0.6.0"
 dshot-frame = "0.2.1"
+embassy-usb-dfu = { version = "0.3.0", features = ["dfu", "cortex-m", "application"] }
+embassy-boot = "0.7.0"
+embedded-storage = "0.3.1"
+
+[profile.release]
+opt-level = "z"        # "z" = smallest, "s" = small, 3 = fastest
+debug = true
+lto = true             # Link Time Optimization
+codegen-units = 1      # Better optimization, slower compile
+panic = "abort"        # No unwinding (huge size win)
