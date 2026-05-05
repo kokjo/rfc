@@ -105,7 +105,7 @@ pub async fn crsf_rx_task(mut uart: Uart<'static, Async>, channels: crate::Chann
                                 }
                                 channels.send(chans);
                             }
-                            _ => ()
+                            _ => (),
                         }
                     }
                 }

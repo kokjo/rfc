@@ -11,7 +11,7 @@ pub async fn led_task(mut pin: Output<'static>, mut events: SystemEventsSubscrib
         match events.next_message_pure().await {
             crate::SystemEvents::Armed => pin.set_low(),
             crate::SystemEvents::Disarmed => pin.set_high(),
-            _ => ()
+            _ => (),
         }
     }
 }

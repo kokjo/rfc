@@ -3,7 +3,10 @@ use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Timer, with_timeout};
 
-use crate::{SystemEvents, util::{Edge, EdgeDetect, watch}};
+use crate::{
+    SystemEvents,
+    util::{Edge, EdgeDetect, watch},
+};
 
 #[derive(Debug)]
 pub struct RcCtrl {
@@ -38,11 +41,7 @@ pub enum Switch2 {
 
 impl From<u16> for Switch2 {
     fn from(value: u16) -> Self {
-        if value < 993 {
-            Self::Off
-        } else {
-            Self::On
-        }
+        if value < 993 { Self::Off } else { Self::On }
     }
 }
 
@@ -98,8 +97,12 @@ impl Control {
 
 #[embassy_executor::task]
 pub async fn control_task() {
-    let events = crate::EVENTS.publisher().expect("Control loop: Faield to get event publisher");
-    let mut channels = crate::CHANNELS.receiver().expect("Control loop: Failed to get channels receiver");
+    let events = crate::EVENTS
+        .publisher()
+        .expect("Control loop: Faield to get event publisher");
+    let mut channels = crate::CHANNELS
+        .receiver()
+        .expect("Control loop: Failed to get channels receiver");
     let gimbal_sender = crate::CONTROL.gimbals.sender();
     let left_btn_sender = crate::CONTROL.left_button.sender();
     let left_sw_sender = crate::CONTROL.left_switch.sender();
@@ -112,7 +115,7 @@ pub async fn control_task() {
                 thr: chans[2],
                 pit: chans[1],
                 rol: chans[0],
-                yaw: chans[3]
+                yaw: chans[3],
             };
             gimbal_sender.send(gimbals);
 
@@ -126,7 +129,6 @@ pub async fn control_task() {
             left_sw_sender.send_if_modified(|value| update_if_different(value, chans[5].into()));
             right_sw_sender.send_if_modified(|value| update_if_different(value, chans[6].into()));
             right_btn_sender.send_if_modified(|value| update_if_different(value, chans[7].into()));
-
         } else {
             gimbal_sender.clear();
             events.publish(SystemEvents::Disarmed).await;
@@ -137,7 +139,7 @@ pub async fn control_task() {
 pub fn update_if_different<T: PartialEq>(value: &mut Option<T>, update: T) -> bool {
     let update = Some(update);
     if value == &update {
-        return false
+        return false;
     }
     *value = update;
     true

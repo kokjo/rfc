@@ -10,6 +10,8 @@
 
 use core::sync::atomic::AtomicBool;
 
+use crate::dshot::Motors;
+use crate::gyro::{Accel, AtomicGyro};
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_executor::Spawner;
 use embassy_stm32::exti::ExtiInput;
@@ -28,12 +30,11 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::pubsub::PubSubBehavior;
 use embassy_time::{Duration, Ticker, Timer};
 use static_cell::StaticCell;
-use crate::dshot::Motors;
-use crate::gyro::{Accel, AtomicGyro};
 
 use {defmt_rtt as _, panic_probe as _};
 
 pub mod btn;
+pub mod control;
 pub mod crsf;
 pub mod dshot;
 pub mod gyro;
@@ -41,9 +42,8 @@ pub mod led;
 pub mod osd;
 pub mod pids;
 pub mod pwm;
-pub mod util;
 pub mod usb;
-pub mod control;
+pub mod util;
 
 bind_interrupts!(struct Irqs {
     USB_LP => embassy_stm32::usb::InterruptHandler<embassy_stm32::peripherals::USB>;
@@ -73,8 +73,10 @@ const EVENTS_CAP: usize = 10;
 const EVENTS_SUBS: usize = 10;
 const EVENTS_PUBS: usize = 10;
 type SystemEventsPubSub = util::pubsub::PubSub<SystemEvents, EVENTS_CAP, EVENTS_SUBS, EVENTS_PUBS>;
-type SystemEventsSubscriber = util::pubsub::Subscriber<SystemEvents, EVENTS_CAP, EVENTS_SUBS, EVENTS_PUBS>;
-type SystemEventsPublisher = util::pubsub::Publisher<SystemEvents, EVENTS_CAP, EVENTS_SUBS, EVENTS_PUBS>;
+type SystemEventsSubscriber =
+    util::pubsub::Subscriber<SystemEvents, EVENTS_CAP, EVENTS_SUBS, EVENTS_PUBS>;
+type SystemEventsPublisher =
+    util::pubsub::Publisher<SystemEvents, EVENTS_CAP, EVENTS_SUBS, EVENTS_PUBS>;
 static EVENTS: SystemEventsPubSub = util::pubsub::PubSub::new();
 
 // static CONTROLS: RcCtrl = RcCtrl::new();
@@ -120,7 +122,13 @@ async fn main(spawner: Spawner) {
     usb::start_usb_device(&spawner, p.USB, p.PA12, p.PA11);
 
     spawner.spawn(btn::boot_btn_task(ExtiInput::new(p.PB8, p.EXTI8, Pull::None, Irqs)).unwrap());
-    spawner.spawn(led::led_task(Output::new(p.PC4, Level::High, Speed::High), EVENTS.subscriber().unwrap()).unwrap());
+    spawner.spawn(
+        led::led_task(
+            Output::new(p.PC4, Level::High, Speed::High),
+            EVENTS.subscriber().unwrap(),
+        )
+        .unwrap(),
+    );
 
     let pwm = {
         let led0 = PwmPin::new(p.PB6, OutputType::PushPull);
@@ -135,7 +143,14 @@ async fn main(spawner: Spawner) {
         )
     };
     let channels = pwm.split();
-    spawner.spawn(pwm::pwm_task(channels.ch1, (200..1800).into(), CONTROL.gimbals.receiver().unwrap()).unwrap());
+    spawner.spawn(
+        pwm::pwm_task(
+            channels.ch1,
+            (200..1800).into(),
+            CONTROL.gimbals.receiver().unwrap(),
+        )
+        .unwrap(),
+    );
 
     let usart3 = {
         let mut config = usart::Config::default();
@@ -195,7 +210,15 @@ async fn main(spawner: Spawner) {
         )
     };
     spawner.spawn(dshot::dshot_task(motor_pwm, p.DMA2_CH1, &MOTORS).unwrap());
-    spawner.spawn(pids::pids_task(CONTROL.gimbals.anon_receiver(), EVENTS.subscriber().unwrap(), &GYRO, &MOTORS).unwrap());
+    spawner.spawn(
+        pids::pids_task(
+            CONTROL.gimbals.anon_receiver(),
+            EVENTS.subscriber().unwrap(),
+            &GYRO,
+            &MOTORS,
+        )
+        .unwrap(),
+    );
     spawner.spawn(control::control_task().unwrap());
 
     log::info!("System booted!");
@@ -213,8 +236,6 @@ async fn main(spawner: Spawner) {
         wdog_ticker.next().await;
     }
 }
-
-
 
 // #define USE_ACC
 // #define USE_GYRO

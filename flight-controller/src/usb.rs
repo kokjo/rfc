@@ -1,5 +1,9 @@
 use embassy_executor::Spawner;
-use embassy_stm32::{Peri, peripherals::USB, usb::{DmPin, DpPin}};
+use embassy_stm32::{
+    Peri,
+    peripherals::USB,
+    usb::{DmPin, DpPin},
+};
 use static_cell::StaticCell;
 
 type UsbDriver = embassy_stm32::usb::Driver<'static, USB>;

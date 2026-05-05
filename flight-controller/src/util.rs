@@ -241,19 +241,19 @@ impl<T: Averageable> Default for Average<T> {
 }
 
 pub struct EdgeDetect {
-    history: [bool; 2]
+    history: [bool; 2],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Edge {
     Rising,
-    Falling
+    Falling,
 }
 
 impl EdgeDetect {
     pub const fn new() -> Self {
         Self {
-            history: [false; 2]
+            history: [false; 2],
         }
     }
 
@@ -262,7 +262,7 @@ impl EdgeDetect {
         match self.history {
             [true, false] => Some(Edge::Falling),
             [false, true] => Some(Edge::Rising),
-            _ => None
+            _ => None,
         }
     }
 }

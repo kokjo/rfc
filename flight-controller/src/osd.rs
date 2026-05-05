@@ -1,4 +1,8 @@
-use core::{convert::Infallible, fmt::{Write, write}, intrinsics::unreachable};
+use core::{
+    convert::Infallible,
+    fmt::{Write, write},
+    intrinsics::unreachable,
+};
 
 use embassy_time::Timer;
 use embedded_hal::spi::Operation;
@@ -181,7 +185,7 @@ impl TryFrom<u8> for ResetMode {
         match value & 1 {
             1 => Ok(ResetMode::PowerOnReset),
             0 => Ok(ResetMode::Running),
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 }
@@ -205,15 +209,13 @@ impl Register for Status {
     const SIZE: usize = 1;
 
     fn encode(&self) -> [u8; Self::SIZE] {
-        [
-            ((self.reset_mode as u8) << 6) |
-            ((self.character_memory_unavailable as u8) << 5) |
-            ((self.vsync as u8) << 4) | 
-            ((self.hsync as u8) << 3) | 
-            ((self.loss_of_sync as u8) << 2) | 
-            ((self.ntsc_detect as u8) << 1) | 
-            (self.pal_detect as u8)
-        ]
+        [((self.reset_mode as u8) << 6)
+            | ((self.character_memory_unavailable as u8) << 5)
+            | ((self.vsync as u8) << 4)
+            | ((self.hsync as u8) << 3)
+            | ((self.loss_of_sync as u8) << 2)
+            | ((self.ntsc_detect as u8) << 1)
+            | (self.pal_detect as u8)]
     }
 
     fn decode(v: [u8; Self::SIZE]) -> Result<Self, Self::Error> {
@@ -222,14 +224,14 @@ impl Register for Status {
             character_memory_unavailable: ((v[0] >> 5) & 1) == 1,
             vsync: ((v[0] >> 4) & 1) == 1,
             hsync: ((v[0] >> 3) & 1) == 1,
-            loss_of_sync: ((v[0] >> 2) & 1) == 1, 
+            loss_of_sync: ((v[0] >> 2) & 1) == 1,
             ntsc_detect: ((v[0] >> 1) & 1) == 1,
             pal_detect: (v[0] & 1) == 1,
         })
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]    
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct DMAL(u8);
 
 impl Register for DMAL {
@@ -248,11 +250,11 @@ impl Register for DMAL {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]    
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 enum OperationMode {
     Mode16Bit = 0,
-    Mode8Bit = 1
+    Mode8Bit = 1,
 }
 
 impl TryFrom<u8> for OperationMode {
@@ -262,17 +264,17 @@ impl TryFrom<u8> for OperationMode {
         match value & 1 {
             0 => Ok(OperationMode::Mode16Bit),
             1 => Ok(OperationMode::Mode8Bit),
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]    
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct DisplayMemoryMode {
-    operation_mode: OperationMode
+    operation_mode: OperationMode,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]    
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum ByteSelect {
     Address = 0,
@@ -286,12 +288,12 @@ impl TryFrom<u8> for ByteSelect {
         match value & 1 {
             0 => Ok(ByteSelect::Address),
             1 => Ok(ByteSelect::Attribute),
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]    
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct DMAH {
     byte_select: ByteSelect,
     msb: bool,
@@ -305,10 +307,7 @@ impl Register for DMAH {
     const SIZE: usize = 1;
 
     fn encode(&self) -> [u8; Self::SIZE] {
-        [
-            ((self.byte_select as u8) << 1) | 
-            (self.msb as u8)
-        ]
+        [((self.byte_select as u8) << 1) | (self.msb as u8)]
     }
 
     fn decode(v: [u8; Self::SIZE]) -> Result<Self, Self::Error> {
@@ -318,7 +317,6 @@ impl Register for DMAH {
         })
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub enum ReadRegisterError<Spi: SpiDevice, Reg: Register> {
@@ -340,7 +338,7 @@ impl<SpiDev: SpiDevice> MAX7456<SpiDev> {
         loop {
             let status = self.read_register::<Status>().await.map_err(|_| ())?;
             if status.reset_mode == ResetMode::Running {
-                break
+                break;
             }
         }
 
@@ -356,14 +354,13 @@ impl<SpiDev: SpiDevice> MAX7456<SpiDev> {
         vm0.software_reset = SoftwareReset::Reseting;
         self.write_register(vm0).await.map_err(|_| ())?;
 
-
         // Wait until reset is finished
         loop {
             let vm0 = self.read_register::<VideoMode0>().await.map_err(|_| ())?;
             if vm0.software_reset == SoftwareReset::Running {
                 break vm0;
             }
-        };
+        }
 
         Ok(())
     }
@@ -385,7 +382,11 @@ impl<SpiDev: SpiDevice> MAX7456<SpiDev> {
         Reg::decode(bytes).map_err(ReadRegisterError::Decode)
     }
 
-    pub async fn write_dma(&mut self, address: u16, byte_select: ByteSelect) -> Result<(), SpiDev::Error> {
+    pub async fn write_dma(
+        &mut self,
+        address: u16,
+        byte_select: ByteSelect,
+    ) -> Result<(), SpiDev::Error> {
         let dmah = DMAH {
             byte_select,
             msb: ((address >> 8) & 1) == 1,
@@ -398,11 +399,13 @@ impl<SpiDev: SpiDevice> MAX7456<SpiDev> {
     }
 
     pub async fn write_dmdi(&mut self, data: &[u8]) -> Result<(), SpiDev::Error> {
-        self.spidev.transaction(&mut [
-            Operation::Write(&[0x07]),
-            Operation::Write(data),
-            // Operation::Write(&[0xff, 0xff]),
-        ]).await
+        self.spidev
+            .transaction(&mut [
+                Operation::Write(&[0x07]),
+                Operation::Write(data),
+                // Operation::Write(&[0xff, 0xff]),
+            ])
+            .await
     }
 
     pub async fn write_register<Reg: Register>(&mut self, reg: Reg) -> Result<(), SpiDev::Error>
@@ -416,24 +419,31 @@ impl<SpiDev: SpiDevice> MAX7456<SpiDev> {
         Ok(())
     }
 
-    pub async fn modify_register<Reg: Register, F: FnOnce(&mut Reg)>(&mut self, f: F) -> Result<(), ReadRegisterError<SpiDev, Reg>>
-    where 
+    pub async fn modify_register<Reg: Register, F: FnOnce(&mut Reg)>(
+        &mut self,
+        f: F,
+    ) -> Result<(), ReadRegisterError<SpiDev, Reg>>
+    where
         [(); Reg::SIZE]:,
     {
         let mut reg = self.read_register().await?;
         f(&mut reg);
-        self.write_register(reg).await.map_err(ReadRegisterError::Spi)?;
+        self.write_register(reg)
+            .await
+            .map_err(ReadRegisterError::Spi)?;
         Ok(())
     }
 }
 
 #[embassy_executor::task]
-pub async fn osd_task(
-    spidev: Stm32SpiDevice,
-) {
+pub async fn osd_task(spidev: Stm32SpiDevice) {
     let mut max7456 = MAX7456::new(spidev);
     max7456.reset().await.expect("OSD: Could not reset MAX7465");
-    max7456.modify_register::<VideoMode0, _>(|vm0| vm0.enable_osd_display = OnOff::On).await.map_err(|_| ()).expect("OSD: Failed to enable OSD in VM0");
+    max7456
+        .modify_register::<VideoMode0, _>(|vm0| vm0.enable_osd_display = OnOff::On)
+        .await
+        .map_err(|_| ())
+        .expect("OSD: Failed to enable OSD in VM0");
     let mut display = UpdateBuffer::new();
     loop {
         let armed = match crate::CONTROL.left_button.try_get() {
@@ -444,7 +454,7 @@ pub async fn osd_task(
 
         let _ = display.write_fmt(1, 2, |w| write!(w, "ARMED: {armed}"));
 
-        let (gyro_pit, gyro_rol , gyro_yaw) = crate::GYRO.read();
+        let (gyro_pit, gyro_rol, gyro_yaw) = crate::GYRO.read();
         let _ = display.write_fmt(2, 2, |w| write!(w, "GY P: {gyro_pit:4.1}"));
         let _ = display.write_fmt(3, 2, |w| write!(w, "GY R: {gyro_rol:4.1}"));
         let _ = display.write_fmt(4, 2, |w| write!(w, "GY Y: {gyro_yaw:4.1}"));
@@ -471,17 +481,14 @@ pub async fn osd_task(
     }
 }
 
-struct SliceWriter<'a>{
+struct SliceWriter<'a> {
     content: &'a mut [u8],
-    offset: usize
+    offset: usize,
 }
 
 impl<'a> SliceWriter<'a> {
     pub fn new(content: &'a mut [u8]) -> Self {
-        Self {
-            content,
-            offset: 0
-        }
+        Self { content, offset: 0 }
     }
 }
 
@@ -497,7 +504,6 @@ impl<'a> Write for SliceWriter<'a> {
     }
 }
 
-
 #[derive(Debug, Clone, Copy)]
 struct DisplayMemory([u8; 30 * 16]);
 
@@ -506,8 +512,13 @@ impl DisplayMemory {
         Self([0x20u8; 30 * 16])
     }
 
-    pub fn write_fmt<F : FnOnce(&mut SliceWriter) -> core::fmt::Result>(&mut self, row: u16, col: u16, f: F) -> core::fmt::Result {
-        let mut writer = SliceWriter::new(&mut self.0[(30*row + col) as usize..]);
+    pub fn write_fmt<F: FnOnce(&mut SliceWriter) -> core::fmt::Result>(
+        &mut self,
+        row: u16,
+        col: u16,
+        f: F,
+    ) -> core::fmt::Result {
+        let mut writer = SliceWriter::new(&mut self.0[(30 * row + col) as usize..]);
         f(&mut writer)
     }
 }
@@ -526,7 +537,12 @@ impl UpdateBuffer {
     }
 
     pub fn updates(&mut self) -> impl Iterator<Item = (usize, u8)> {
-        self.0[0].0.iter().enumerate().zip(self.0[1].0.iter()).filter_map(|((i, a), b)| (a != b).then_some((i, *b)))
+        self.0[0]
+            .0
+            .iter()
+            .enumerate()
+            .zip(self.0[1].0.iter())
+            .filter_map(|((i, a), b)| (a != b).then_some((i, *b)))
     }
 
     pub fn swap_and_clear(&mut self) {
@@ -534,7 +550,12 @@ impl UpdateBuffer {
         self.0[1] = DisplayMemory::new();
     }
 
-    pub fn write_fmt<F: FnOnce(&mut SliceWriter) -> core::fmt::Result>(&mut self, row: u16, col: u16, f: F) -> core::fmt::Result {
+    pub fn write_fmt<F: FnOnce(&mut SliceWriter) -> core::fmt::Result>(
+        &mut self,
+        row: u16,
+        col: u16,
+        f: F,
+    ) -> core::fmt::Result {
         self.0[1].write_fmt(row, col, f)
     }
 }

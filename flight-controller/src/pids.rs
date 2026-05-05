@@ -5,7 +5,11 @@ use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Ticker};
 
 use crate::{
-    ACCEL, SystemEvents, control::Gimbals, dshot::Motors, gyro::{AtomicGyro, Gyro}, util::{Average, RateLimter, constrain, deadband, scale}
+    ACCEL, SystemEvents,
+    control::Gimbals,
+    dshot::Motors,
+    gyro::{AtomicGyro, Gyro},
+    util::{Average, RateLimter, constrain, deadband, scale},
 };
 
 struct Pid {
@@ -80,19 +84,18 @@ pub async fn pids_task(
     let mut accel_calibrated = false;
 
     loop {
-        match select(
-            ticker.next(),
-            events.next_message()
-        ).await {
+        match select(ticker.next(), events.next_message()).await {
             Either::First(()) => {
                 if !armed || !gyro_calibrated || !accel_calibrated {
                     if tick_rl.check() {
-                        log::info!("armed: {armed:?}, gyro: {gyro_calibrated:?}, accel: {accel_calibrated:?}");
+                        log::info!(
+                            "armed: {armed:?}, gyro: {gyro_calibrated:?}, accel: {accel_calibrated:?}"
+                        );
                     }
                     motors.armed.store(false, Ordering::Relaxed);
                     continue;
                 }
-            },
+            }
             Either::Second(WaitResult::Lagged(skipped)) => {
                 log::warn!("Pid loop missed {skipped} system events, lag!?");
                 continue;
@@ -119,19 +122,15 @@ pub async fn pids_task(
                     SystemEvents::Disarmed => {
                         armed = false;
                     }
-                    _ => ()
+                    _ => (),
                 }
                 continue;
             }
         }
 
         let gimbals = gimbals.try_get().unwrap_or_default();
-        let (rc_thr_raw, rc_pit_raw, rc_rol_raw, rc_yaw_raw) = (
-            gimbals.thr,
-            gimbals.pit,
-            gimbals.rol,
-            gimbals.yaw,
-        );
+        let (rc_thr_raw, rc_pit_raw, rc_rol_raw, rc_yaw_raw) =
+            (gimbals.thr, gimbals.pit, gimbals.rol, gimbals.yaw);
 
         let rc_thr = scale(rc_thr_raw as f32, 174.0, 1811.0, 0.0, 1500.0);
         let rc_pit = scale(rc_pit_raw as f32, 174.0, 1811.0, -180.0, 180.0);
