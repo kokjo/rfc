@@ -1,5 +1,3 @@
-use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
-
 use embassy_stm32::{mode::Async, usart::Uart};
 use embassy_time::Duration;
 
@@ -9,54 +7,6 @@ use crate::util::RateLimter;
 pub enum CRSFMessage {
     RcChannels([u16; 16]),
     Unknown(u8),
-}
-
-#[derive(Debug)]
-pub struct RcCtrl {
-    pub thr: AtomicU16,
-    pub pit: AtomicU16,
-    pub rol: AtomicU16,
-    pub yaw: AtomicU16,
-    pub arm: AtomicBool,
-    pub btn: AtomicBool,
-    pub frames: AtomicU32,
-}
-
-impl RcCtrl {
-    pub const fn new() -> Self {
-        Self {
-            thr: AtomicU16::new(0),
-            pit: AtomicU16::new(0),
-            rol: AtomicU16::new(0),
-            yaw: AtomicU16::new(0),
-            arm: AtomicBool::new(false),
-            btn: AtomicBool::new(false),
-            frames: AtomicU32::new(0),
-        }
-    }
-
-    pub fn read_rc(&self) -> (u16, u16, u16, u16) {
-        (
-            self.thr.load(Ordering::Relaxed),
-            self.pit.load(Ordering::Relaxed),
-            self.rol.load(Ordering::Relaxed),
-            self.yaw.load(Ordering::Relaxed),
-        )
-    }
-
-    pub fn armed(&self) -> bool {
-        self.arm.load(Ordering::Relaxed)
-    }
-
-    pub fn frames(&self) -> u32 {
-        self.frames.load(Ordering::Relaxed)
-    }
-}
-
-impl Default for RcCtrl {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -130,10 +80,11 @@ impl CSRFFramer {
 }
 
 #[embassy_executor::task]
-pub async fn crsf_rx_task(mut uart: Uart<'static, Async>, ctrl: &'static RcCtrl) {
+pub async fn crsf_rx_task(mut uart: Uart<'static, Async>, channels: crate::ChannelsSender) {
     let mut framer = CSRFFramer::new();
 
     let mut err_rl = RateLimter::new(Duration::from_millis(100));
+    let mut channels_rl = RateLimter::new(Duration::from_secs(1));
 
     loop {
         let mut buffer = [0u8; 64];
@@ -147,7 +98,15 @@ pub async fn crsf_rx_task(mut uart: Uart<'static, Async>, ctrl: &'static RcCtrl)
                     // }
 
                     if let Some(message) = framer.push(byte) {
-                        handle_message(&message, ctrl);
+                        match message {
+                            CRSFMessage::RcChannels(chans) => {
+                                if channels_rl.check() {
+                                    log::info!("Channels: {chans:?}");
+                                }
+                                channels.send(chans);
+                            }
+                            _ => ()
+                        }
                     }
                 }
             }
@@ -156,26 +115,6 @@ pub async fn crsf_rx_task(mut uart: Uart<'static, Async>, ctrl: &'static RcCtrl)
                     log::warn!("CSRF: {err:?}");
                 }
             }
-        }
-    }
-}
-
-pub fn handle_message(message: &CRSFMessage, ctrl: &RcCtrl) {
-    match message {
-        CRSFMessage::RcChannels(chans) => {
-            ctrl.thr.store(chans[2], Ordering::Relaxed);
-            ctrl.pit.store(chans[1], Ordering::Relaxed);
-            ctrl.rol.store(chans[0], Ordering::Relaxed);
-            ctrl.yaw.store(chans[3], Ordering::Relaxed);
-            ctrl.arm.store(chans[4] > 1024, Ordering::Relaxed);
-            ctrl.btn.store(chans[8] > 1024, Ordering::Relaxed);
-            ctrl.frames.fetch_add(1, Ordering::Relaxed);
-        }
-        _message => {
-            // if last_msg.elapsed().as_millis() > 100 {
-            //     log::info!("CSRF: {message:x?}");
-            //     last_msg = Instant::now();
-            // }
         }
     }
 }

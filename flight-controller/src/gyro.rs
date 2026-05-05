@@ -1,6 +1,7 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use embassy_stm32::{exti::ExtiInput, mode::Async};
+use embassy_sync::pubsub::PubSubBehavior;
 use embassy_time::{Duration, Ticker, Timer};
 use embedded_hal::spi::Operation;
 use embedded_hal_async::spi::SpiDevice;
@@ -193,6 +194,8 @@ pub async fn gyro_task(
                             avg[1],
                             avg[2]
                         );
+                        crate::EVENTS.publish_immediate(crate::SystemEvents::GyroCalibrated);
+                        crate::EVENTS.publish_immediate(crate::SystemEvents::AccelCalibrated);
                     }
                 }
 

@@ -1,12 +1,5 @@
-use core::cell::RefCell;
-
-use embassy_boot::{AlignedBuffer, BlockingFirmwareState, FirmwareUpdaterConfig};
-use embassy_embedded_hal::flash::{ConcatFlash, partition::BlockingPartition};
 use embassy_executor::Spawner;
-use embassy_stm32::{Peri, flash::{Bank1Region, Bank2Region, Blocking, Flash, WRITE_SIZE}, peripherals::{FLASH, USB}, usb::{DmPin, DpPin}};
-use embassy_sync::blocking_mutex::{Mutex, raw::NoopRawMutex};
-use embassy_time::Duration;
-use embassy_usb_dfu::{application::{DfuState, Handler}, consts::DfuAttributes};
+use embassy_stm32::{Peri, peripherals::USB, usb::{DmPin, DpPin}};
 use static_cell::StaticCell;
 
 type UsbDriver = embassy_stm32::usb::Driver<'static, USB>;
@@ -18,29 +11,29 @@ static MSOS_DESCRIPTOR_BUF: StaticCell<[u8; 256]> = StaticCell::new();
 static CONTROL_BUF: StaticCell<[u8; 1024]> = StaticCell::new();
 static ACM_STATE: StaticCell<embassy_usb::class::cdc_acm::State> = StaticCell::new();
 
-type WholeFlash = ConcatFlash<Bank1Region<'static, Blocking>, Bank2Region<'static, Blocking>>;
-type OurFlash = Mutex<NoopRawMutex, RefCell<WholeFlash>>;
-type Partition = BlockingPartition<'static, NoopRawMutex, WholeFlash>;
-static FLASH_CELL: StaticCell<OurFlash> = StaticCell::new();
+// type WholeFlash = ConcatFlash<Bank1Region<'static, Blocking>, Bank2Region<'static, Blocking>>;
+// type OurFlash = Mutex<NoopRawMutex, RefCell<WholeFlash>>;
+// type Partition = BlockingPartition<'static, NoopRawMutex, WholeFlash>;
+// static FLASH_CELL: StaticCell<OurFlash> = StaticCell::new();
 
-struct DfuHandler<'d, FLASH: embedded_storage::nor_flash::NorFlash> {
-    firmware_state: BlockingFirmwareState<'d, FLASH>
-}
+// struct DfuHandler<'d, FLASH: embedded_storage::nor_flash::NorFlash> {
+//     firmware_state: BlockingFirmwareState<'d, FLASH>
+// }
 
-impl<'d, FLASH: embedded_storage::nor_flash::NorFlash> Handler for DfuHandler<'d, FLASH> {
-    fn enter_dfu(&mut self) {
-        self.firmware_state.mark_dfu().expect("Failed to make boot state to enter DFU");
-        cortex_m::peripheral::SCB::sys_reset();
-    }
-}
+// impl<'d, FLASH: embedded_storage::nor_flash::NorFlash> Handler for DfuHandler<'d, FLASH> {
+//     fn enter_dfu(&mut self) {
+//         self.firmware_state.mark_dfu().expect("Failed to make boot state to enter DFU");
+//         cortex_m::peripheral::SCB::sys_reset();
+//     }
+// }
 
-static FIRMWARE_STATE_BUFFER: StaticCell<AlignedBuffer<8>> = StaticCell::new();
-static DFU_STATE: StaticCell<DfuState<DfuHandler<Partition>>> = StaticCell::new();
+// static FIRMWARE_STATE_BUFFER: StaticCell<AlignedBuffer<8>> = StaticCell::new();
+// static DFU_STATE: StaticCell<DfuState<DfuHandler<Partition>>> = StaticCell::new();
 
 pub fn start_usb_device(
     spawner: &Spawner,
     usb: Peri<'static, USB>,
-    flash: Peri<'static, FLASH>,
+    // flash: Peri<'static, FLASH>,
     dp: Peri<'static, impl DpPin<USB>>,
     dm: Peri<'static, impl DmPin<USB>>,
 ) {

@@ -1,13 +1,11 @@
 use core::{f32, sync::atomic::Ordering};
 
+use embassy_futures::select::{Either, select};
+use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Ticker};
 
 use crate::{
-    ACCEL,
-    crsf::RcCtrl,
-    dshot::Motors,
-    gyro::{AtomicGyro, Gyro},
-    util::{Average, RateLimter, constrain, deadband, scale},
+    ACCEL, SystemEvents, control::Gimbals, dshot::Motors, gyro::{AtomicGyro, Gyro}, util::{Average, RateLimter, constrain, deadband, scale}
 };
 
 struct Pid {
@@ -55,50 +53,85 @@ impl PidParams {
     }
 }
 
-static PID_RP: PidParams = PidParams::new(1.0, 1.0, 0.01);
-static PID_Y: PidParams = PidParams::new(1.0, 1.0, 0.01);
+static PID_RP: PidParams = PidParams::new(2.5, 1.0, 0.005);
+static PID_Y: PidParams = PidParams::new(2.5, 1.0, 0.005);
 
 #[embassy_executor::task]
 pub async fn pids_task(
-    ctrl: &'static RcCtrl,
+    mut gimbals: crate::util::watch::AnonReceiver<Gimbals, 4>,
+    mut events: crate::SystemEventsSubscriber,
     mut gyro: &'static AtomicGyro,
     motors: &'static Motors,
 ) {
     let timing = Duration::from_hz(8000);
     let mut ticker = Ticker::every(timing);
-    let mut tick_rl = RateLimter::new(Duration::from_millis(100));
+    let mut tick_rl = RateLimter::new(Duration::from_millis(250));
 
     let mut pit_pid = Pid::new(PID_RP.kp, PID_RP.ki, PID_RP.kd);
     let mut rol_pid = Pid::new(PID_RP.kp, PID_RP.ki, PID_RP.kd);
     let mut yaw_pid = Pid::new(PID_Y.kp, PID_Y.ki, PID_Y.kd);
 
-    let mut arm_history = [false; 2];
-
     let mut gyro_avg: Average<[f32; 3]> = Average::new();
     let mut accel_avg: Average<[f32; 3]> = Average::new();
     let mut motor_avg: Average<[f32; 4]> = Average::new();
 
+    let mut armed = false;
+    let mut gyro_calibrated = false;
+    let mut accel_calibrated = false;
+
     loop {
-        ticker.next().await;
+        match select(
+            ticker.next(),
+            events.next_message()
+        ).await {
+            Either::First(()) => {
+                if !armed || !gyro_calibrated || !accel_calibrated {
+                    if tick_rl.check() {
+                        log::info!("armed: {armed:?}, gyro: {gyro_calibrated:?}, accel: {accel_calibrated:?}");
+                    }
+                    motors.armed.store(false, Ordering::Relaxed);
+                    continue;
+                }
+            },
+            Either::Second(WaitResult::Lagged(skipped)) => {
+                log::warn!("Pid loop missed {skipped} system events, lag!?");
+                continue;
+            }
+            Either::Second(WaitResult::Message(msg)) => {
+                match msg {
+                    SystemEvents::Armed => {
+                        log::info!("Pid loop arming, calibrating gyro/accel, reseting pids");
+                        crate::GYRO_CAL.store(true, Ordering::Relaxed);
+                        motors.armed.store(false, Ordering::Relaxed);
+                        pit_pid.reset();
+                        rol_pid.reset();
+                        yaw_pid.reset();
 
-        let armed = ctrl.armed();
-        arm_history = [arm_history[1], armed];
-
-        if arm_history == [false, true] {
-            log::info!("Arming resetting PIDs");
-            pit_pid.reset();
-            rol_pid.reset();
-            yaw_pid.reset();
-
-            crate::GYRO_CAL.store(true, Ordering::Relaxed);
+                        armed = true;
+                        gyro_calibrated = false;
+                    }
+                    SystemEvents::GyroCalibrated => {
+                        gyro_calibrated = true;
+                    }
+                    SystemEvents::AccelCalibrated => {
+                        accel_calibrated = true;
+                    }
+                    SystemEvents::Disarmed => {
+                        armed = false;
+                    }
+                    _ => ()
+                }
+                continue;
+            }
         }
 
-        if crate::GYRO_CAL.load(Ordering::Relaxed) {
-            motors.armed.store(false, Ordering::Relaxed);
-            continue; // DO NOT UPDATE PID & MOTORS. 
-        }
-
-        let (rc_thr_raw, rc_pit_raw, rc_rol_raw, rc_yaw_raw) = ctrl.read_rc();
+        let gimbals = gimbals.try_get().unwrap_or_default();
+        let (rc_thr_raw, rc_pit_raw, rc_rol_raw, rc_yaw_raw) = (
+            gimbals.thr,
+            gimbals.pit,
+            gimbals.rol,
+            gimbals.yaw,
+        );
 
         let rc_thr = scale(rc_thr_raw as f32, 174.0, 1811.0, 0.0, 1500.0);
         let rc_pit = scale(rc_pit_raw as f32, 174.0, 1811.0, -180.0, 180.0);
@@ -141,8 +174,6 @@ pub async fn pids_task(
         motors.armed.store(armed, Ordering::Relaxed);
 
         if tick_rl.check() {
-            let frames = ctrl.frames();
-
             let armed = if armed { "A" } else { "D" };
 
             let [m0, m1, m2, m3] = motor_avg.average();
@@ -159,8 +190,9 @@ pub async fn pids_task(
             let pitch = scale(pitch, -f32::consts::PI, f32::consts::PI, -180.0, 180.0);
 
             #[rustfmt::skip]
-            log::info!("{:08x}: {} RC {:4.1}\t{:4.1}\t{:4.1}\t{:4.1}\tGYRO {:4.1}\t{:4.1}\t{:4.1}\tACCEL {:4.1}\t{:4.1}\t{:4.1}\tANGLE {:3.3}\t{:3.3}\tMOTORS {:4.1}\t{:4.1}\t{:4.1}\t{:4.1} DT {:1.8}",
-                frames, armed,
+            log::info!(
+                "{} RC {:4.1}\t{:4.1}\t{:4.1}\t{:4.1}\tGYRO {:4.1}\t{:4.1}\t{:4.1}\tACCEL {:4.1}\t{:4.1}\t{:4.1}\tANGLE {:3.3}\t{:3.3}\tMOTORS {:4.1}\t{:4.1}\t{:4.1}\t{:4.1} DT {:1.8}",
+                armed,
                 rc_thr, rc_pit, rc_rol, rc_yaw,
                 gy_avg_pit, gy_avg_rol, gy_avg_yaw,
                 acc_avg_x, acc_avg_y, acc_avg_z,

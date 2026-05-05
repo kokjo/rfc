@@ -28,7 +28,6 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::pubsub::PubSubBehavior;
 use embassy_time::{Duration, Ticker, Timer};
 use static_cell::StaticCell;
-use crate::crsf::RcCtrl;
 use crate::dshot::Motors;
 use crate::gyro::{Accel, AtomicGyro};
 
@@ -44,6 +43,7 @@ pub mod pids;
 pub mod pwm;
 pub mod util;
 pub mod usb;
+pub mod control;
 
 bind_interrupts!(struct Irqs {
     USB_LP => embassy_stm32::usb::InterruptHandler<embassy_stm32::peripherals::USB>;
@@ -52,6 +52,8 @@ bind_interrupts!(struct Irqs {
     DMA1_CHANNEL2 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH2>;
     DMA1_CHANNEL3 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH3>;
     DMA1_CHANNEL4 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH4>;
+    DMA1_CHANNEL5 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH5>;
+    DMA1_CHANNEL6 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA1_CH6>;
     EXTI9_5 => embassy_stm32::exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI9_5>;
     DMA2_CHANNEL1 => embassy_stm32::dma::InterruptHandler<embassy_stm32::peripherals::DMA2_CH1>;
     EXTI15_10 => embassy_stm32::exti::InterruptHandler<embassy_stm32::interrupt::typelevel::EXTI15_10>;
@@ -67,19 +69,34 @@ pub enum SystemEvents {
     AccelCalibrated,
 }
 
-static EVENTS: util::pubsub::PubSub<SystemEvents, 10, 10, 10> = util::pubsub::PubSub::new();
+const EVENTS_CAP: usize = 10;
+const EVENTS_SUBS: usize = 10;
+const EVENTS_PUBS: usize = 10;
+type SystemEventsPubSub = util::pubsub::PubSub<SystemEvents, EVENTS_CAP, EVENTS_SUBS, EVENTS_PUBS>;
+type SystemEventsSubscriber = util::pubsub::Subscriber<SystemEvents, EVENTS_CAP, EVENTS_SUBS, EVENTS_PUBS>;
+type SystemEventsPublisher = util::pubsub::Publisher<SystemEvents, EVENTS_CAP, EVENTS_SUBS, EVENTS_PUBS>;
+static EVENTS: SystemEventsPubSub = util::pubsub::PubSub::new();
 
-static CONTROLS: RcCtrl = RcCtrl::new();
+// static CONTROLS: RcCtrl = RcCtrl::new();
 static GYRO: AtomicGyro = AtomicGyro::new();
 static GYRO_CAL: AtomicBool = AtomicBool::new(false);
 pub static ACCEL: Accel = Accel::new();
 static MOTORS: Motors = Motors::new();
 
-pub type Stm32SpiBus = Mutex<NoopRawMutex, Spi<'static, Async, Master>>;
-pub type Stm32SpiDevice =
-    SpiDevice<'static, NoopRawMutex, Spi<'static, Async, Master>, Output<'static>>;
+const CHANNELS_N: usize = 1;
+type Channels = crate::util::watch::Watch<[u16; 16], CHANNELS_N>;
+type ChannelsSender = crate::util::watch::Sender<[u16; 16], CHANNELS_N>;
+type ChannelsReceiver = crate::util::watch::Recviver<[u16; 16], CHANNELS_N>;
+static CHANNELS: Channels = Channels::new();
+
+static CONTROL: control::Control = control::Control::new();
+
+pub type Stm32Spi = Spi<'static, Async, Master>;
+pub type Stm32SpiBus = Mutex<NoopRawMutex, Stm32Spi>;
+pub type Stm32SpiDevice = SpiDevice<'static, NoopRawMutex, Stm32Spi, Output<'static>>;
 
 static SPI1_BUS: StaticCell<Stm32SpiBus> = StaticCell::new();
+static SPI2_BUS: StaticCell<Stm32SpiBus> = StaticCell::new();
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -100,11 +117,10 @@ async fn main(spawner: Spawner) {
         embassy_stm32::init(config)
     };
 
-    usb::start_usb_device(&spawner, p.USB, p.FLASH, p.PA12, p.PA11);
+    usb::start_usb_device(&spawner, p.USB, p.PA12, p.PA11);
 
     spawner.spawn(btn::boot_btn_task(ExtiInput::new(p.PB8, p.EXTI8, Pull::None, Irqs)).unwrap());
-    spawner
-        .spawn(led::led_task(Output::new(p.PC4, Level::High, Speed::High), &CONTROLS.arm).unwrap());
+    spawner.spawn(led::led_task(Output::new(p.PC4, Level::High, Speed::High), EVENTS.subscriber().unwrap()).unwrap());
 
     let pwm = {
         let led0 = PwmPin::new(p.PB6, OutputType::PushPull);
@@ -119,7 +135,7 @@ async fn main(spawner: Spawner) {
         )
     };
     let channels = pwm.split();
-    spawner.spawn(pwm::pwm_task(channels.ch1, (200..1800).into(), &CONTROLS.thr).unwrap());
+    spawner.spawn(pwm::pwm_task(channels.ch1, (200..1800).into(), CONTROL.gimbals.receiver().unwrap()).unwrap());
 
     let usart3 = {
         let mut config = usart::Config::default();
@@ -132,21 +148,35 @@ async fn main(spawner: Spawner) {
         )
         .unwrap()
     };
-    spawner.spawn(crsf::crsf_rx_task(usart3, &CONTROLS).unwrap());
+    spawner.spawn(crsf::crsf_rx_task(usart3, CHANNELS.sender()).unwrap());
 
     let spi1_bus = SPI1_BUS.init({
         let mut config = spi::Config::default();
         config.frequency = Hertz::mhz(20);
-        let spi = Spi::new(
+        Mutex::new(Spi::new(
             p.SPI1, p.PA5, p.PA7, p.PA6, p.DMA1_CH3, p.DMA1_CH4, Irqs, config,
-        );
-        Mutex::new(spi)
+        ))
     });
 
     let gyro_device = SpiDevice::new(spi1_bus, Output::new(p.PC14, Level::High, Speed::High));
     let gyro_intr = ExtiInput::new(p.PC15, p.EXTI15, Pull::None, Irqs);
 
     spawner.spawn(gyro::gyro_task(gyro_device, gyro_intr, &GYRO_CAL, &GYRO, &ACCEL).unwrap());
+
+    let spi2_bus = SPI2_BUS.init({
+        let mut config = spi::Config::default();
+        config.frequency = Hertz::mhz(5);
+        config.mode = spi::Mode {
+            polarity: spi::Polarity::IdleLow,
+            phase: spi::Phase::CaptureOnFirstTransition,
+        };
+        Mutex::new(Spi::new(
+            p.SPI2, p.PB13, p.PB15, p.PB14, p.DMA1_CH5, p.DMA1_CH6, Irqs, config,
+        ))
+    });
+
+    let osd_device = SpiDevice::new(spi2_bus, Output::new(p.PB12, Level::High, Speed::High));
+    spawner.spawn(osd::osd_task(osd_device).unwrap());
 
     let motor_pwm = {
         let ch1 = PwmPin::new(p.PC6, OutputType::PushPull);
@@ -165,8 +195,8 @@ async fn main(spawner: Spawner) {
         )
     };
     spawner.spawn(dshot::dshot_task(motor_pwm, p.DMA2_CH1, &MOTORS).unwrap());
-    spawner.spawn(pids::pids_task(&CONTROLS, &GYRO, &MOTORS).unwrap());
-    // spawner.spawn(btn::rc_btn_task(&CONTROLS).unwrap());
+    spawner.spawn(pids::pids_task(CONTROL.gimbals.anon_receiver(), EVENTS.subscriber().unwrap(), &GYRO, &MOTORS).unwrap());
+    spawner.spawn(control::control_task().unwrap());
 
     log::info!("System booted!");
 
@@ -174,7 +204,6 @@ async fn main(spawner: Spawner) {
 
     Timer::after_secs(3).await;
     GYRO_CAL.store(true, core::sync::atomic::Ordering::Relaxed);
-    // check_enter_bootloader();
 
     let mut wdog = IndependentWatchdog::new(p.IWDG, 1000 * 1000);
     let mut wdog_ticker = Ticker::every(Duration::from_millis(100));
