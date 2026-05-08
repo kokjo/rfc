@@ -7,11 +7,14 @@
 #![feature(generic_const_exprs)]
 #![feature(unwrap_infallible)]
 #![feature(never_type)]
+#![feature(core_float_math)]
 
 use core::sync::atomic::AtomicBool;
 
 use crate::dshot::Motors;
 use crate::gyro::{Accel, AtomicGyro};
+use crate::util::pubsub::PubSub;
+use crate::util::watch::Watch;
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_executor::Spawner;
 use embassy_stm32::exti::ExtiInput;
@@ -69,29 +72,15 @@ pub enum SystemEvents {
     AccelCalibrated,
 }
 
-const EVENTS_CAP: usize = 10;
-const EVENTS_SUBS: usize = 10;
-const EVENTS_PUBS: usize = 10;
-type SystemEventsPubSub = util::pubsub::PubSub<SystemEvents, EVENTS_CAP, EVENTS_SUBS, EVENTS_PUBS>;
-type SystemEventsSubscriber =
-    util::pubsub::Subscriber<SystemEvents, EVENTS_CAP, EVENTS_SUBS, EVENTS_PUBS>;
-type SystemEventsPublisher =
-    util::pubsub::Publisher<SystemEvents, EVENTS_CAP, EVENTS_SUBS, EVENTS_PUBS>;
-static EVENTS: SystemEventsPubSub = util::pubsub::PubSub::new();
+static EVENTS: PubSub<SystemEvents, 10, 10, 10> = PubSub::new();
 
-// static CONTROLS: RcCtrl = RcCtrl::new();
+static CHANNELS: Watch<[u16; 16], 4> = Watch::new();
+static CONTROL: control::Control = control::Control::new();
+
 static GYRO: AtomicGyro = AtomicGyro::new();
 static GYRO_CAL: AtomicBool = AtomicBool::new(false);
 pub static ACCEL: Accel = Accel::new();
 static MOTORS: Motors = Motors::new();
-
-const CHANNELS_N: usize = 1;
-type Channels = crate::util::watch::Watch<[u16; 16], CHANNELS_N>;
-type ChannelsSender = crate::util::watch::Sender<[u16; 16], CHANNELS_N>;
-type ChannelsReceiver = crate::util::watch::Recviver<[u16; 16], CHANNELS_N>;
-static CHANNELS: Channels = Channels::new();
-
-static CONTROL: control::Control = control::Control::new();
 
 pub type Stm32Spi = Spi<'static, Async, Master>;
 pub type Stm32SpiBus = Mutex<NoopRawMutex, Stm32Spi>;
@@ -122,35 +111,19 @@ async fn main(spawner: Spawner) {
     usb::start_usb_device(&spawner, p.USB, p.PA12, p.PA11);
 
     spawner.spawn(btn::boot_btn_task(ExtiInput::new(p.PB8, p.EXTI8, Pull::None, Irqs)).unwrap());
-    spawner.spawn(
-        led::led_task(
-            Output::new(p.PC4, Level::High, Speed::High),
-            EVENTS.subscriber().unwrap(),
-        )
-        .unwrap(),
-    );
+    spawner.spawn(led::led_task(Output::new(p.PC4, Level::High, Speed::High)).unwrap());
 
-    let pwm = {
-        let led0 = PwmPin::new(p.PB6, OutputType::PushPull);
-        SimplePwm::new(
-            p.TIM4,
-            Some(led0),
-            None,
-            None,
-            None,
-            Hertz::khz(100),
-            Default::default(),
-        )
-    };
-    let channels = pwm.split();
-    spawner.spawn(
-        pwm::pwm_task(
-            channels.ch1,
-            (200..1800).into(),
-            CONTROL.gimbals.receiver().unwrap(),
-        )
-        .unwrap(),
+    let pwm = SimplePwm::new(
+        p.TIM4,
+        Some(PwmPin::new(p.PB6, OutputType::PushPull)),
+        None,
+        None,
+        None,
+        Hertz::khz(100),
+        Default::default(),
     );
+    let channels = pwm.split();
+    spawner.spawn(pwm::pwm_task(channels.ch1).unwrap());
 
     let usart3 = {
         let mut config = usart::Config::default();
@@ -163,7 +136,7 @@ async fn main(spawner: Spawner) {
         )
         .unwrap()
     };
-    spawner.spawn(crsf::crsf_rx_task(usart3, CHANNELS.sender()).unwrap());
+    spawner.spawn(crsf::crsf_rx_task(usart3).unwrap());
 
     let spi1_bus = SPI1_BUS.init({
         let mut config = spi::Config::default();
@@ -193,32 +166,18 @@ async fn main(spawner: Spawner) {
     let osd_device = SpiDevice::new(spi2_bus, Output::new(p.PB12, Level::High, Speed::High));
     spawner.spawn(osd::osd_task(osd_device).unwrap());
 
-    let motor_pwm = {
-        let ch1 = PwmPin::new(p.PC6, OutputType::PushPull);
-        let ch2 = PwmPin::new(p.PA4, OutputType::PushPull);
-        let ch3 = PwmPin::new(p.PB0, OutputType::PushPull);
-        let ch4 = PwmPin::new(p.PB1, OutputType::PushPull);
-
-        SimplePwm::new(
-            p.TIM3,
-            Some(ch1),
-            Some(ch2),
-            Some(ch3),
-            Some(ch4),
-            Hertz::khz(600),
-            CountingMode::EdgeAlignedUp,
-        )
-    };
-    spawner.spawn(dshot::dshot_task(motor_pwm, p.DMA2_CH1, &MOTORS).unwrap());
-    spawner.spawn(
-        pids::pids_task(
-            CONTROL.gimbals.anon_receiver(),
-            EVENTS.subscriber().unwrap(),
-            &GYRO,
-            &MOTORS,
-        )
-        .unwrap(),
+    let motor_pwm = SimplePwm::new(
+        p.TIM3,
+        Some(PwmPin::new(p.PC6, OutputType::PushPull)),
+        Some(PwmPin::new(p.PA4, OutputType::PushPull)),
+        Some(PwmPin::new(p.PB0, OutputType::PushPull)),
+        Some(PwmPin::new(p.PB1, OutputType::PushPull)),
+        Hertz::khz(600),
+        CountingMode::EdgeAlignedUp,
     );
+    spawner.spawn(dshot::dshot_task(motor_pwm, p.DMA2_CH1, &MOTORS).unwrap());
+    spawner.spawn(pids::pids_task().unwrap());
+    // spawner.spawn(pids::freq_task().unwrap());
     spawner.spawn(control::control_task().unwrap());
 
     log::info!("System booted!");

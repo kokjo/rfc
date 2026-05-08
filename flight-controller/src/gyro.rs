@@ -1,4 +1,8 @@
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::{
+    f32::consts::TAU,
+    intrinsics::{cosf32, sinf32},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use embassy_stm32::{exti::ExtiInput, mode::Async};
 use embassy_sync::pubsub::PubSubBehavior;
@@ -8,7 +12,7 @@ use embedded_hal_async::spi::SpiDevice;
 
 use crate::{
     Stm32SpiDevice,
-    util::{self, AtomicF32, Average, RateLimter, rotate},
+    util::{self, AtomicF32, Average, RateLimter},
 };
 
 pub trait Gyro {
@@ -88,6 +92,17 @@ impl<G> TransformGyro<G> {
         Self { inner, transform }
     }
 
+    pub fn new_rotate(inner: G, angle: f32) -> Self {
+        Self::new(
+            inner,
+            [
+                [cosf32(angle), -sinf32(angle), 0.0, 0.0],
+                [sinf32(angle), cosf32(angle), 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+            ],
+        )
+    }
+
     pub fn set_bias(&mut self, bias: [f32; 3]) {
         self.transform[0][3] = bias[0];
         self.transform[1][3] = bias[1];
@@ -145,14 +160,8 @@ pub async fn gyro_task(
     gyro: &'static AtomicGyro,
     accel: &'static Accel,
 ) {
-    let mut icm = TransformGyro::new(
-        ICM42688P::new(spidev).await.unwrap(),
-        [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-        ],
-    );
+    let mut icm =
+        TransformGyro::new_rotate(ICM42688P::new(spidev).await.unwrap(), -45.0 * (TAU / 360.0));
 
     let mut cal_average: Average<[f32; 3]> = Average::new();
     let mut cal_running = false;
@@ -200,7 +209,7 @@ pub async fn gyro_task(
                 }
 
                 let [pit, rol, yaw] = dps;
-                let (pit, rol) = rotate(pit, rol, -45.0 * (core::f32::consts::PI / 180.0));
+                // let (pit, rol) = rotate(pit, rol, -45.0 * (core::f32::consts::PI / 180.0));
                 let pit = -pit;
                 gyro.pit.store(pit, Ordering::Relaxed);
                 gyro.rol.store(rol, Ordering::Relaxed);

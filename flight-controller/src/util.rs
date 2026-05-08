@@ -54,14 +54,6 @@ pub fn deadband(v: f32, mid: f32, band: f32) -> f32 {
     if (v - mid).abs() < band { mid } else { v }
 }
 
-pub fn rotate(x: f32, y: f32, angle: f32) -> (f32, f32) {
-    use core::intrinsics::{cosf32, sinf32};
-    (
-        x * cosf32(angle) - y * sinf32(angle),
-        x * sinf32(angle) + y * cosf32(angle),
-    )
-}
-
 type RawMutex = embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
 pub mod watch {

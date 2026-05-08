@@ -1,30 +1,18 @@
-use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
+use core::sync::atomic::AtomicU32;
 
-use embassy_futures::select::{Either, select};
-use embassy_time::{Duration, Timer, with_timeout};
+use embassy_time::{Duration, with_timeout};
 
 use crate::{
     SystemEvents,
-    util::{Edge, EdgeDetect, watch},
+    util::{Edge, EdgeDetect, scale, watch},
 };
 
-#[derive(Debug)]
-pub struct RcCtrl {
-    pub thr: AtomicU16,
-    pub pit: AtomicU16,
-    pub rol: AtomicU16,
-    pub yaw: AtomicU16,
-    pub arm: AtomicBool,
-    pub btn: AtomicBool,
-    pub frames: AtomicU32,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Default)]
 pub struct Gimbals {
-    pub thr: u16,
-    pub pit: u16,
-    pub rol: u16,
-    pub yaw: u16,
+    pub thr: f32,
+    pub pit: f32,
+    pub rol: f32,
+    pub yaw: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -112,10 +100,10 @@ pub async fn control_task() {
     loop {
         if let Ok(chans) = with_timeout(Duration::from_secs(1), channels.changed()).await {
             let gimbals = Gimbals {
-                thr: chans[2],
-                pit: chans[1],
-                rol: chans[0],
-                yaw: chans[3],
+                thr: scale(chans[2] as f32, 174.0, 1810.0, 0.0, 1500.0),
+                pit: scale(chans[1] as f32, 174.0, 1810.0, -180.0, 180.0),
+                rol: scale(chans[0] as f32, 174.0, 1810.0, -180.0, 180.0),
+                yaw: -scale(chans[3] as f32, 174.0, 1810.0, -270.0, 270.0),
             };
             gimbal_sender.send(gimbals);
 

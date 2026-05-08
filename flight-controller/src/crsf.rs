@@ -80,7 +80,8 @@ impl CSRFFramer {
 }
 
 #[embassy_executor::task]
-pub async fn crsf_rx_task(mut uart: Uart<'static, Async>, channels: crate::ChannelsSender) {
+pub async fn crsf_rx_task(mut uart: Uart<'static, Async>) {
+    let channels = crate::CHANNELS.sender();
     let mut framer = CSRFFramer::new();
 
     let mut err_rl = RateLimter::new(Duration::from_millis(100));

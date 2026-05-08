@@ -1,14 +1,10 @@
-use core::{
-    convert::Infallible,
-    fmt::{Write, write},
-    intrinsics::unreachable,
-};
+use core::fmt::Write;
 
 use embassy_time::Timer;
 use embedded_hal::spi::Operation;
 use embedded_hal_async::spi::SpiDevice;
 
-use crate::{Stm32SpiDevice, control::Switch2, util::scale};
+use crate::{Stm32SpiDevice, control::Switch2};
 
 pub trait Register: Sized {
     type Error;
@@ -191,7 +187,7 @@ impl TryFrom<u8> for ResetMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct Status {
+pub struct Status {
     reset_mode: ResetMode,
     character_memory_unavailable: bool,
     vsync: bool,
@@ -252,7 +248,7 @@ impl Register for DMAL {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
-enum OperationMode {
+pub enum OperationMode {
     Mode16Bit = 0,
     Mode8Bit = 1,
 }
@@ -270,7 +266,7 @@ impl TryFrom<u8> for OperationMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct DisplayMemoryMode {
+pub struct DisplayMemoryMode {
     operation_mode: OperationMode,
 }
 
@@ -358,7 +354,7 @@ impl<SpiDev: SpiDevice> MAX7456<SpiDev> {
         loop {
             let vm0 = self.read_register::<VideoMode0>().await.map_err(|_| ())?;
             if vm0.software_reset == SoftwareReset::Running {
-                break vm0;
+                break;
             }
         }
 
@@ -447,28 +443,36 @@ pub async fn osd_task(spidev: Stm32SpiDevice) {
     let mut display = UpdateBuffer::new();
     loop {
         let armed = match crate::CONTROL.left_button.try_get() {
-            Some(Switch2::Off) => "0",
-            Some(Switch2::On) => "1",
-            None => "U",
+            Some(Switch2::Off) => "DISARMED",
+            Some(Switch2::On) => "ARMED",
+            None => "FAILSAFE",
         };
 
-        let _ = display.write_fmt(1, 2, |w| write!(w, "ARMED: {armed}"));
+        let _ = display.write_fmt(1, 2, |w| write!(w, "{armed}"));
 
-        let (gyro_pit, gyro_rol, gyro_yaw) = crate::GYRO.read();
-        let _ = display.write_fmt(2, 2, |w| write!(w, "GY P: {gyro_pit:4.1}"));
-        let _ = display.write_fmt(3, 2, |w| write!(w, "GY R: {gyro_rol:4.1}"));
-        let _ = display.write_fmt(4, 2, |w| write!(w, "GY Y: {gyro_yaw:4.1}"));
+        let (gyro_pit, gyro_rol, _gyro_yaw) = crate::GYRO.read();
+        let _ = display.write_fmt(2, 2, |w| write!(w, "G\x15: {gyro_pit:>+6.1}"));
+        let _ = display.write_fmt(3, 2, |w| write!(w, "G\x14: {gyro_rol:>+6.1}"));
 
-        if let Some((gimbals)) = crate::CONTROL.gimbals.try_get() {
-            let thr = scale(gimbals.thr as f32, 174.0, 1811.0, 0.0, 100.0);
-            let pit = scale(gimbals.pit as f32, 174.0, 1811.0, -180.0, 180.0);
-            let rol = scale(gimbals.rol as f32, 174.0, 1811.0, -180.0, 180.0);
-            let yaw = scale(gimbals.yaw as f32, 174.0, 1811.0, 270.0, 270.0);
-            let _ = display.write_fmt(4, 2, |w| write!(w, "RC P: {pit:4.1}"));
-            let _ = display.write_fmt(5, 2, |w| write!(w, "RC R: {rol:4.1}"));
-            let _ = display.write_fmt(6, 2, |w| write!(w, "RC Y: {yaw:4.1}"));
-            let _ = display.write_fmt(7, 2, |w| write!(w, "THR: {thr:4.1}"));
+        if let Some(gimbals) = crate::CONTROL.gimbals.try_get() {
+            let thr = gimbals.thr;
+            let pit = gimbals.pit;
+            let rol = gimbals.rol;
+            let _ = display.write_fmt(4, 2, |w| write!(w, "R\x15: {pit:>+6.1}"));
+            let _ = display.write_fmt(5, 2, |w| write!(w, "R\x14: {rol:>+6.1}"));
+            let _ = display.write_fmt(7, 2, |w| write!(w, "R\x04: {thr:>+6.1}"));
         }
+
+        let motors = crate::MOTORS.speeds();
+        let _ = display.write_fmt(4, 20, |w| write!(w, "M0: {:>4}", motors[0]));
+        let _ = display.write_fmt(5, 20, |w| write!(w, "M1: {:>4}", motors[1]));
+        let _ = display.write_fmt(6, 20, |w| write!(w, "M2: {:>4}", motors[2]));
+        let _ = display.write_fmt(7, 20, |w| write!(w, "M3: {:>4}", motors[3]));
+
+        let pit_freq = crate::pids::PIT_FREQ.load(core::sync::atomic::Ordering::Relaxed);
+        let rol_freq = crate::pids::ROL_FREQ.load(core::sync::atomic::Ordering::Relaxed);
+        let _ = display.write_fmt(2, 20, |w| write!(w, "\x15: {pit_freq:>4.1}"));
+        let _ = display.write_fmt(3, 20, |w| write!(w, "\x14: {rol_freq:>4.1}"));
 
         for (addr, byte) in display.updates() {
             let _ = max7456.write_dma(addr as u16, ByteSelect::Address).await;
@@ -528,7 +532,6 @@ impl Default for DisplayMemory {
         Self::new()
     }
 }
-
 struct UpdateBuffer([DisplayMemory; 2]);
 
 impl UpdateBuffer {

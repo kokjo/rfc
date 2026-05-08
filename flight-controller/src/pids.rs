@@ -1,4 +1,7 @@
-use core::{f32, sync::atomic::Ordering};
+use core::{
+    f32::{self, consts::TAU},
+    sync::atomic::Ordering,
+};
 
 use embassy_futures::select::{Either, select};
 use embassy_sync::pubsub::WaitResult;
@@ -6,10 +9,8 @@ use embassy_time::{Duration, Ticker};
 
 use crate::{
     ACCEL, SystemEvents,
-    control::Gimbals,
-    dshot::Motors,
-    gyro::{AtomicGyro, Gyro},
-    util::{Average, RateLimter, constrain, deadband, scale},
+    gyro::Gyro,
+    util::{AtomicF32, Average, RateLimter, constrain, deadband, scale},
 };
 
 struct Pid {
@@ -45,6 +46,7 @@ impl Pid {
     }
 }
 
+#[derive(Debug, Clone)]
 struct PidParams {
     kp: f32,
     ki: f32,
@@ -57,23 +59,25 @@ impl PidParams {
     }
 }
 
-static PID_RP: PidParams = PidParams::new(2.5, 1.0, 0.005);
-static PID_Y: PidParams = PidParams::new(2.5, 1.0, 0.005);
+static PID_RP: PidParams = PidParams::new(2.0, 0.5, 0.0005);
+// static PID_Y: PidParams = PidParams::new(2.0, 0.5, 0.01);
 
 #[embassy_executor::task]
-pub async fn pids_task(
-    mut gimbals: crate::util::watch::AnonReceiver<Gimbals, 4>,
-    mut events: crate::SystemEventsSubscriber,
-    mut gyro: &'static AtomicGyro,
-    motors: &'static Motors,
-) {
+pub async fn pids_task() {
+    let mut gyro = &crate::GYRO;
+    let motors = &crate::MOTORS;
+
+    let mut events = crate::EVENTS.subscriber().unwrap();
+    let mut gimbals = crate::CONTROL.gimbals.anon_receiver();
+
     let timing = Duration::from_hz(8000);
     let mut ticker = Ticker::every(timing);
     let mut tick_rl = RateLimter::new(Duration::from_millis(250));
 
     let mut pit_pid = Pid::new(PID_RP.kp, PID_RP.ki, PID_RP.kd);
     let mut rol_pid = Pid::new(PID_RP.kp, PID_RP.ki, PID_RP.kd);
-    let mut yaw_pid = Pid::new(PID_Y.kp, PID_Y.ki, PID_Y.kd);
+    let mut yaw_pid = Pid::new(PID_RP.kp, PID_RP.ki, PID_RP.kd);
+    // let mut yaw_pid = Pid::new(PID_Y.kp, PID_Y.ki, PID_Y.kd);
 
     let mut gyro_avg: Average<[f32; 3]> = Average::new();
     let mut accel_avg: Average<[f32; 3]> = Average::new();
@@ -129,18 +133,11 @@ pub async fn pids_task(
         }
 
         let gimbals = gimbals.try_get().unwrap_or_default();
-        let (rc_thr_raw, rc_pit_raw, rc_rol_raw, rc_yaw_raw) =
-            (gimbals.thr, gimbals.pit, gimbals.rol, gimbals.yaw);
 
-        let rc_thr = scale(rc_thr_raw as f32, 174.0, 1811.0, 0.0, 1500.0);
-        let rc_pit = scale(rc_pit_raw as f32, 174.0, 1811.0, -180.0, 180.0);
-        let rc_rol = scale(rc_rol_raw as f32, 174.0, 1811.0, -180.0, 180.0);
-        let rc_yaw = -scale(rc_yaw_raw as f32, 174.0, 1811.0, -270.0, 270.0);
-
-        let rc_thr = if rc_thr < 10.0 { 0.0 } else { rc_thr };
-        let rc_pit = deadband(rc_pit, 0.0, 1.0);
-        let rc_rol = deadband(rc_rol, 0.0, 1.0);
-        let rc_yaw = deadband(rc_yaw, 0.0, 1.0);
+        let rc_thr = if gimbals.thr < 10.0 { 0.0 } else { gimbals.thr };
+        let rc_pit = deadband(gimbals.pit, 0.0, 1.0);
+        let rc_rol = deadband(gimbals.rol, 0.0, 1.0);
+        let rc_yaw = deadband(gimbals.yaw, 0.0, 1.0);
 
         let gyro_data = gyro.gyro_read().await.into_ok();
         gyro_avg.update(gyro_data);
@@ -227,4 +224,74 @@ fn tilt(ax: f32, ay: f32, az: f32) -> (f32, f32) {
     let roll = fast_atan2(ay, az);
     let pitch = fast_atan2(-ax, core::intrinsics::sqrtf32(ay * ay + az * az));
     (roll, pitch)
+}
+
+pub static PIT_FREQ: AtomicF32 = AtomicF32::new(0.0);
+pub static ROL_FREQ: AtomicF32 = AtomicF32::new(0.0);
+
+#[embassy_executor::task]
+pub async fn freq_task() {
+    let gyro = &crate::GYRO;
+    let mut ticker = Ticker::every(Duration::from_hz(1000));
+
+    let mut pit_pll = PLL::new(1000.0, 200.0);
+    let mut rol_pll = PLL::new(1000.0, 200.0);
+
+    let mut gy_pit_avg = 0.0;
+    let mut gy_rol_avg = 0.0;
+
+    let alpha = 0.03;
+
+    let mut events = crate::EVENTS.subscriber().unwrap();
+
+    loop {
+        match select(ticker.next(), events.next_message_pure()).await {
+            Either::First(()) => {
+                let (gy_pit, gy_rol, _gy_yaw) = gyro.read();
+                gy_pit_avg = (1.0 - alpha) * gy_pit_avg + alpha * gy_pit;
+                gy_rol_avg = (1.0 - alpha) * gy_rol_avg + alpha * gy_rol;
+                PIT_FREQ.store(pit_pll.update(gy_pit - gy_pit_avg), Ordering::Relaxed);
+                ROL_FREQ.store(rol_pll.update(gy_rol - gy_rol_avg), Ordering::Relaxed);
+            }
+            Either::Second(SystemEvents::GyroCalibrated) => {
+                pit_pll = PLL::new(1000.0, 200.0);
+                rol_pll = PLL::new(1000.0, 200.0);
+            }
+            Either::Second(_) => {}
+        }
+    }
+}
+
+struct PLL {
+    phase: f32,
+    freq: f32,
+    integral: f32,
+    kp: f32,
+    ki: f32,
+    fs: f32,
+}
+
+impl PLL {
+    pub const fn new(fs: f32, f0: f32) -> Self {
+        Self {
+            phase: 0.0,
+            freq: f0,
+            integral: 0.0,
+            kp: 0.1,
+            ki: 0.01,
+            fs: fs,
+        }
+    }
+
+    pub fn update(&mut self, sample: f32) -> f32 {
+        let wave = core::intrinsics::cosf32(sample);
+        let error = sample * wave;
+        self.integral += error / self.fs;
+
+        let cv = self.kp * error + self.ki * self.integral;
+        self.freq = (self.freq + cv).clamp(10.0, 1000.0);
+        self.phase = core::f32::math::rem_euclid(self.phase + TAU * (self.freq / self.fs), TAU);
+
+        self.freq
+    }
 }
